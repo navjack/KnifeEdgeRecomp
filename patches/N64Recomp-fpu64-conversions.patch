@@ -1,0 +1,23 @@
+diff --git a/src/operations.cpp b/src/operations.cpp
+--- a/src/operations.cpp
++++ b/src/operations.cpp
+@@ -31,11 +31,19 @@ namespace N64Recomp {
+         { InstrId::cpu_cvt_s_l,   { UnaryOpType::ConvertSFromL,  Operand::Fd,       Operand::FsU64,    true } },
+         { InstrId::cpu_cvt_l_s,   { UnaryOpType::ConvertLFromS,  Operand::FdU64,    Operand::Fs,       true, true } },
+         { InstrId::cpu_trunc_w_s, { UnaryOpType::TruncateWFromS, Operand::FdU32L,   Operand::Fs,       true } },
+         { InstrId::cpu_trunc_w_d, { UnaryOpType::TruncateWFromD, Operand::FdU32L,   Operand::FsDouble, true } },
++        { InstrId::cpu_trunc_l_s, { UnaryOpType::TruncateLFromS, Operand::FdU64,    Operand::Fs,       true } },
++        { InstrId::cpu_trunc_l_d, { UnaryOpType::TruncateLFromD, Operand::FdU64,    Operand::FsDouble, true } },
+         { InstrId::cpu_round_w_s, { UnaryOpType::RoundWFromS,    Operand::FdU32L,   Operand::Fs,       true } },
+         { InstrId::cpu_round_w_d, { UnaryOpType::RoundWFromD,    Operand::FdU32L,   Operand::FsDouble, true } },
++        { InstrId::cpu_round_l_s, { UnaryOpType::RoundLFromS,    Operand::FdU64,    Operand::Fs,       true } },
++        { InstrId::cpu_round_l_d, { UnaryOpType::RoundLFromD,    Operand::FdU64,    Operand::FsDouble, true } },
+         { InstrId::cpu_ceil_w_s,  { UnaryOpType::CeilWFromS,     Operand::FdU32L,   Operand::Fs,       true } },
+         { InstrId::cpu_ceil_w_d,  { UnaryOpType::CeilWFromD,     Operand::FdU32L,   Operand::FsDouble, true } },
++        { InstrId::cpu_ceil_l_s,  { UnaryOpType::CeilLFromS,     Operand::FdU64,    Operand::Fs,       true } },
++        { InstrId::cpu_ceil_l_d,  { UnaryOpType::CeilLFromD,     Operand::FdU64,    Operand::FsDouble, true } },
+         { InstrId::cpu_floor_w_s, { UnaryOpType::FloorWFromS,    Operand::FdU32L,   Operand::Fs,       true } },
+         { InstrId::cpu_floor_w_d, { UnaryOpType::FloorWFromD,    Operand::FdU32L,   Operand::FsDouble, true } },
++        { InstrId::cpu_floor_l_s, { UnaryOpType::FloorLFromS,    Operand::FdU64,    Operand::Fs,       true } },
++        { InstrId::cpu_floor_l_d, { UnaryOpType::FloorLFromD,    Operand::FdU64,    Operand::FsDouble, true } },
+     };

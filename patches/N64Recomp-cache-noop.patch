@@ -1,0 +1,15 @@
+diff --git a/src/recompilation.cpp b/src/recompilation.cpp
+--- a/src/recompilation.cpp
++++ b/src/recompilation.cpp
+@@ -412,7 +412,11 @@ bool process_instruction(GeneratorType& generator, const N64Recomp::Context& con
+ 
+     switch (instr_id) {
+     case InstrId::cpu_nop:
+         fmt::print(output_file, "\n");
+         break;
++    case InstrId::cpu_cache:
++        // N64 cache maintenance has no host-side operation after static recompilation.
++        fmt::print(output_file, "    /* N64 cache maintenance: no host-side operation */\n");
++        break;
+     // Cop0 (Limited functionality)
+     case InstrId::cpu_mfc0:

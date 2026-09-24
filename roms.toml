@@ -1,0 +1,21 @@
+# Exact fingerprint manifest for the supported Knife Edge dumps.
+# scripts/recompile.sh refuses to run against a ROM that does not match.
+
+title = "Knife Edge: Nose Gunner"
+internal_name = "KNIFE EDGE"
+game_code = "NKEE"
+boot_address = 0x800C2400
+
+[[rom]]
+file = "rom/Knife Edge - Nose Gunner (U) [!].z64"
+sha256 = "467fcb503f384d2479fb3a5fe22405089f56ecab38a3acd1a6aaf0d8b73372b5"
+sha1 = "b247167e37e7f62924be6b0d2362a091fd2352ac"
+md5 = "8043d829fcd4f8f72dd81e5c6dde916f"
+# XXH3-64 of the whole big-endian .z64, which is what librecomp's
+# recomp::GameEntry::rom_hash compares against.
+xxh3 = "56605501a85c79af"
+crc1 = "fce0d799"
+crc2 = "65316c54"
+size = 8388608
+region = "USA"
+preferred = true

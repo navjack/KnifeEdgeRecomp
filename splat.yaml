@@ -1,0 +1,55 @@
+name: Knife Edge - Nose Gunner (North America)
+sha1: b247167e37e7f62924be6b0d2362a091fd2352ac
+
+options:
+  basename: knife_edge
+  target_path: rom/Knife Edge - Nose Gunner (U) [!].z64
+  elf_path: build/knife_edge.elf
+  base_path: .
+  platform: n64
+  compiler: IDO
+  ld_script_path: build/knife_edge.ld
+  ld_dependencies: True
+  find_file_boundaries: True
+  header_encoding: ASCII
+  o_as_suffix: True
+  use_legacy_include_asm: False
+  mips_abi_float_regs: o32
+  symbol_addrs_path:
+    - decomp/symbol_addrs.txt
+  reloc_addrs_path:
+    - decomp/reloc_addrs.txt
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+
+# Boundaries below are read directly out of the boot stub at ROM 0x1000; see
+# docs/ROM_ANALYSIS.md for the derivation. IPL3 copies ROM 0x1000 onward to the
+# header's boot address, so one contiguous code+data segment covers
+# ROM 0x1000..0x2DB50 and BSS is cleared by the stub itself.
+segments:
+  - name: header
+    type: header
+    start: 0x0
+  - name: ipl3
+    type: bin
+    start: 0x40
+  - name: entry
+    type: code
+    start: 0x1000
+    vram: 0x800C2400
+    subsegments:
+      - [0x1000, hasm]
+  - name: main
+    type: code
+    start: 0x1050
+    vram: 0x800C2450
+    follows_vram: entry
+    bss_size: 0x7BCA0
+    subsegments:
+      - [0x1050, asm]
+      - [0x27200, data]
+      - { type: bss, vram: 0x800EEF50 }
+  - type: bin
+    start: 0x2DB50
+    follows_vram: main
+  - [0x800000]

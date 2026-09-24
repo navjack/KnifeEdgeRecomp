@@ -1,0 +1,34 @@
+--- a/src/recompilation.cpp
++++ b/src/recompilation.cpp
+@@ -676,8 +676,18 @@
+         }
+     };
+ 
++    // Writes to $zero have no effect. Emitting them would assign to the
++    // literal 0 (IDO emits `lw $zero, 0(reg)` as a memory probe).
++    auto writes_zero_register = [&](Operand output) {
++        return (output == Operand::Rd && instruction_context.rd == 0) ||
++            (output == Operand::Rt && instruction_context.rt == 0);
++    };
++
+     auto find_binary_it = binary_ops.find(instr_id);
+-    if (find_binary_it != binary_ops.end()) {
++    if (find_binary_it != binary_ops.end() && writes_zero_register(find_binary_it->second.output)) {
++        handled = true;
++    }
++    else if (find_binary_it != binary_ops.end()) {
+         print_indent();
+         const BinaryOp& op = find_binary_it->second;
+         
+@@ -699,7 +709,10 @@
+     }
+ 
+     auto find_unary_it = unary_ops.find(instr_id);
+-    if (find_unary_it != unary_ops.end()) {
++    if (find_unary_it != unary_ops.end() && writes_zero_register(find_unary_it->second.output)) {
++        handled = true;
++    }
++    else if (find_unary_it != unary_ops.end()) {
+         print_indent();
+         const UnaryOp& op = find_unary_it->second;
+         

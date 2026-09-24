@@ -1,0 +1,7 @@
+# One section name per line. Sections listed here are recompiled so they can be
+# loaded at a runtime address that differs from their link address, which is
+# what overlays need.
+#
+# Knife Edge loads its resident code as one fixed segment at 0x800C2400, so no
+# section is relocatable yet. Add overlay section names here as the resource
+# table at 0x800E8600 is decoded (see docs/ROM_ANALYSIS.md).

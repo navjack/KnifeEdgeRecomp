@@ -1,0 +1,28 @@
+diff --git a/librecomp/src/overlays.cpp b/librecomp/src/overlays.cpp
+index 0000000..0000000 100644
+--- a/librecomp/src/overlays.cpp
++++ b/librecomp/src/overlays.cpp
+@@ -367,1 +367,22 @@
+-        fprintf(stderr, "Failed to find function at 0x%08X\n", addr);
++        const uint32_t guest_address = static_cast<uint32_t>(addr);
++        auto loaded_section = std::find_if(loaded_sections.rbegin(), loaded_sections.rend(),
++            [guest_address](const LoadedSection& loaded) {
++                const SectionTableEntry& section = sections_info.code_sections[loaded.section_table_index];
++                const uint32_t loaded_address = static_cast<uint32_t>(loaded.loaded_ram_addr);
++                return guest_address >= loaded_address && guest_address - loaded_address < section.size;
++            });
++        if (loaded_section != loaded_sections.rend()) {
++            const SectionTableEntry& section = sections_info.code_sections[loaded_section->section_table_index];
++            fprintf(stderr,
++                "Failed to find function at 0x%08X in loaded section %zu "
++                "(rom 0x%08X, vram 0x%08X, size 0x%08X, loaded 0x%08X)\n",
++                guest_address,
++                loaded_section->section_table_index,
++                section.rom_addr,
++                section.ram_addr,
++                section.size,
++                static_cast<uint32_t>(loaded_section->loaded_ram_addr));
++        }
++        else {
++            fprintf(stderr, "Failed to find function at 0x%08X; no loaded section contains it\n", guest_address);
++        }

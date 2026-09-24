@@ -1,0 +1,10 @@
+[input]
+# ELF mode. Preferred once a matching MIPS ELF exists in input/.
+rom_file_path = "../rom/Knife Edge - Nose Gunner (U) [!].z64"
+elf_path = "../input/knife-edge.elf"
+output_func_path = "../generated"
+entrypoint = 0x800C2400
+functions_per_output_file = 50
+recomp_include = "#include \"recomp.h\""
+uses_mips3_float_mode = false
+relocatable_sections_path = "relocatable-sections.txt"

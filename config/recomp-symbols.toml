@@ -1,0 +1,22 @@
+[input]
+# Symbol-map mode. This is the path that does not need a matching ELF: it wants
+# a complete, reviewed runtime-addressed symbol map at input/knife-edge.syms.toml.
+rom_file_path = "../rom/Knife Edge - Nose Gunner (U) [!].z64"
+symbols_file_path = "../input/knife-edge.syms.toml"
+output_func_path = "../generated"
+entrypoint = 0x800C2400
+functions_per_output_file = 50
+recomp_include = "#include \"recomp.h\""
+uses_mips3_float_mode = false
+relocatable_sections_path = "relocatable-sections.txt"
+
+# Set true and rebuild to emit per-function entry/return hooks, then run the app
+# with --function-trace-output. Keep it false for release builds; the trace is
+# very large and slows every call.
+trace_mode = false
+
+[patches]
+# Routines that intentionally leave the normal C execution domain (exception
+# vectors, TLB handlers, handwritten RSP jumps) are listed here so they stay in
+# the map but are emitted as linkable no-ops until a native bridge exists.
+stubs = []

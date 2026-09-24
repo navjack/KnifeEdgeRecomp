@@ -1,0 +1,26 @@
+# Authoritative dependency lock for the native Knife Edge build.
+# Revisions and patch fingerprints live together so a fresh checkout can be
+# verified before any generated game artifact is trusted.
+#
+# These are the same pins the Cruis'n workspace uses. They are known to build
+# on arm64 macOS with the patches below applied.
+
+[upstream]
+N64Recomp.url = https://github.com/navjack/N64Recomp.git
+N64Recomp.commit = ffb39cdad1da5de07eaaa48bd1db4a89a7986771
+N64ModernRuntime.url = https://github.com/navjack/N64ModernRuntime.git
+N64ModernRuntime.commit = cdf5abbd5026fef5c364c676e4667c45e42b6863
+rt64.url = https://github.com/navjack/rt64.git
+rt64.commit = 5473732a822a4423b5696e7cb18fecc425a59875
+hlslpp.url = https://github.com/navjack/hlslpp.git
+hlslpp.commit = fba1cda25602b7922eefc6aa20078437a48c9c7a
+libultraship.url = https://github.com/navjack/libultraship.git
+libultraship.commit = 4fa9a040f50277cd0467ef906a07244c540fd833
+RecompFrontend.url = https://github.com/navjack/RecompFrontend.git
+RecompFrontend.commit = e85b912d9df677b04f9358867dd010c8af27ea05
+
+[patches]
+patches/N64Recomp-cache-noop.patch.sha256 = 81764d4f4bc1ca55027b5a75eefffc022ae6b8e220678631a2450d7651e4f75a
+patches/N64Recomp-cop0-registers.patch.sha256 = 0514e8dbcbe0dce7b0a75f7e46f186012f4b8d9aa580045fe770f9c5c822d99b
+patches/N64Recomp-fpu64-conversions.patch.sha256 = 3f086adcaa2bb413df7544ecaa4aa65a13d709e2efc4b7c98be3948bb3aae22a
+patches/N64Recomp-zero-register-writes.patch.sha256 = b261905db6843de5ae880c8a625cdf9fa7172d8ee9856b9c9cd4747723606606

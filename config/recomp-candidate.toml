@@ -1,0 +1,11 @@
+[input]
+# Experimental probe only. The candidate map is generated from Splat's
+# control-flow boundaries; overlays, relocations and data symbols are
+# unresolved, so its output is never treated as reviewed game metadata.
+rom_file_path = "../rom/Knife Edge - Nose Gunner (U) [!].z64"
+symbols_file_path = "../decomp/knife-edge.candidate.syms.toml"
+output_func_path = "../generated-candidate"
+entrypoint = 0x800C2400
+functions_per_output_file = 50
+recomp_include = "#include \"recomp.h\""
+uses_mips3_float_mode = false

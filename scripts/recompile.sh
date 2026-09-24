@@ -1,0 +1,48 @@
+#!/bin/sh
+# Runs N64Recomp against the reviewed metadata in input/ and writes generated/.
+# It refuses to invent game metadata: with no ELF and no symbol map it stops.
+set -eu
+. "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/common.sh"
+RECOMP=${N64RECOMP_BIN:-$ROOT/build/N64Recomp/N64Recomp}
+ELF="$ROOT/input/knife-edge.elf"
+SYMBOLS="$ROOT/input/knife-edge.syms.toml"
+GENERATED="$ROOT/generated"
+
+require_rom
+
+if [ ! -x "$RECOMP" ]; then
+    echo "N64Recomp is missing: $RECOMP"
+    echo "Run ./scripts/build_stack.sh first"
+    exit 2
+fi
+
+if [ -f "$ELF" ]; then
+    CONFIG="$ROOT/config/recomp.toml"
+elif [ -f "$SYMBOLS" ]; then
+    CONFIG="$ROOT/config/recomp-symbols.toml"
+else
+    echo "Missing game metadata: $ELF or $SYMBOLS"
+    echo
+    echo "N64Recomp cannot produce valid native code from a raw ROM alone. A ROM"
+    echo "has bytes but no function boundaries, relocations, data symbols or"
+    echo "overlay information. Supply the matching MIPS ELF or a complete,"
+    echo "reviewed symbol map, then rerun."
+    echo
+    echo "To produce an unreviewed probe instead, see"
+    echo "./scripts/generate_candidate_symbols.sh"
+    exit 2
+fi
+
+echo "Recompiling with $(basename "$CONFIG")"
+cd "$ROOT/config" && "$RECOMP" "$CONFIG"
+
+# Generated code calls runtime replacements named <symbol>_recomp, but funcs.h
+# only declares some of them; declare every one the output actually calls.
+grep -ohE '\b[A-Za-z_][A-Za-z0-9_]*_recomp\(rdram, ctx\)' "$GENERATED"/*.c \
+    | sed 's/(rdram, ctx)$//' \
+    | sort -u \
+    | awk 'BEGIN { print "#pragma once"; print "#include \"recomp.h\"" }
+           { printf "void %s(uint8_t* rdram, recomp_context* ctx);\n", $0 }' \
+    > "$GENERATED/recomp_decls.h"
+
+echo "Generated output: $GENERATED"
