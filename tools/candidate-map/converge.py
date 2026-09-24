@@ -88,13 +88,24 @@ def section_bounds(section):
     return None, None
 
 
-def callers_of(vram):
-    """How many `jal` sites target this address, across the whole image."""
-    needle = f"jal        func_{vram:08X}"
-    total = 0
-    for src in (ROOT / "asm").glob("*.s"):
-        total += src.read_text().count(needle)
-    return total
+def callers_in_section(section, vram):
+    """`jal` sites targeting this address from inside its own overlay."""
+    for name, sec_rom, _v, _s in sections():
+        if name != section:
+            continue
+        src = ROOT / "asm" / f"{sec_rom:X}.s"
+        return src.read_text().count(f"jal        func_{vram:08X}") if src.exists() else 0
+    return 0
+
+
+def map_size(section, vram):
+    """The size the current map gives this function."""
+    m = re.search(rf'name = "{section}".*?functions = \[(.*?)\n\]',
+                  MAP.read_text(), re.S)
+    if not m:
+        return 0
+    hit = re.search(rf'vram = 0x{vram:08X}, size = 0x([0-9A-F]+)', m.group(1))
+    return int(hit.group(1), 16) if hit else 0
 
 
 def current_overrides():
@@ -192,23 +203,34 @@ def main():
             added.append((section, vram, end + 8 - vram,
                           f"jump table 0x{table} runs to 0x{end:08X}"))
 
-        # Catch-all. Anything else N64Recomp rejects -- an unsupported
-        # instruction, a malformed operand -- in a function nothing calls is
-        # Splat having labelled data as code. func_801FA54C is one: 8 KB around
-        # it holds zero function prologues and zero `jr $ra`.
+        # Catch-all for anything else N64Recomp rejects -- an unsupported
+        # instruction, a malformed operand. Two causes, in this order:
+        #
+        # 1. Widening swallowed data past the real end of the function.
+        #    ovl_497140_func_801D61F8 was widened from Splat's 0x1278 to
+        #    0x1A40, and the offending `movn` sits in the extra bytes -- there
+        #    is no movn anywhere in Splat's own disassembly. Shrink back first.
+        # 2. Splat labelled data as code to begin with, in which case nothing
+        #    in the same overlay calls it and it can be dropped. A call from
+        #    another overlay does not make this overlay the owner: they share
+        #    destinations, so that call means whichever overlay is loaded.
         if not added:
-            handled = {v for _, v, _, _ in added}
             for name in FAILED_RE.findall(text):
                 fm = FUNC_RE.match(name)
                 if not fm:
                     continue
                 section = fm.group(1) or "main"
                 vram = int(fm.group(2), 16)
-                if vram in handled or callers_of(vram) != 0:
-                    continue
-                added.append((section, vram, 0,
-                              "not code: nothing calls it and it does not "
-                              "recompile"))
+                anchor = splat_size(section, vram)
+                override = current_overrides().get((section, vram))
+                if anchor and override != anchor and map_size(section, vram) > anchor:
+                    added.append((section, vram, anchor,
+                                  "extent widened past Splat's own size and "
+                                  "swallowed data"))
+                elif callers_in_section(section, vram) == 0:
+                    added.append((section, vram, 0,
+                                  "not code: no caller in this overlay and it "
+                                  "does not recompile"))
 
         if not added:
             print(f"round {attempt}: stuck, nothing actionable in:")
