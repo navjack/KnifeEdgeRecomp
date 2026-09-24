@@ -8,7 +8,19 @@ entrypoint = 0x800C2400
 functions_per_output_file = 50
 recomp_include = "#include \"recomp.h\"\n#include \"game/overlay_bridge.h\""
 uses_mips3_float_mode = false
-relocatable_sections_path = "relocatable-sections.txt"
+# relocatable_sections_path is deliberately NOT set.
+#
+# In symbol-map mode it does not mark anything relocatable -- that is decided
+# solely by the presence of a `relocs` array per section
+# (upstream/N64Recomp/src/config.cpp) -- and without real reloc data marking
+# these sections relocatable actively breaks resolution, because resolve_jal
+# only accepts a candidate whose section is NOT relocatable. What the key does
+# do is build the overlay-id table, which then fails on every name, since none
+# of the sections are registered as relocatable. It also reads the file without
+# stripping comments, so a `#` line is looked up as a section name.
+#
+# config/relocatable-sections.txt is kept as the record of which sections are
+# swapped at runtime; wire it back up if real relocs ever become available.
 
 # Set true and rebuild to emit per-function entry/return hooks, then run the app
 # with --function-trace-output. Keep it false for release builds; the trace is

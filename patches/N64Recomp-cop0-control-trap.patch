@@ -1,0 +1,29 @@
+diff --git a/src/recompilation.cpp b/src/recompilation.cpp
+--- a/src/recompilation.cpp
++++ b/src/recompilation.cpp
+@@ -418,6 +418,25 @@
+         // N64 cache maintenance has no host-side operation after static recompilation.
+         fmt::print(output_file, "    /* N64 cache maintenance: no host-side operation */\n");
+         break;
++    case InstrId::cpu_INVALID:
++    case InstrId::cpu_cfc0:
++    case InstrId::cpu_ctc0:
++    case InstrId::cpu_dmfc0:
++    case InstrId::cpu_dmtc0:
++        // An invalid opcode, or a COP0 control move. Neither can be real code:
++        // a valid IDO build emits no cfc0/ctc0/dmfc0/dmtc0 anywhere in this
++        // game, and an invalid opcode is by definition not an instruction. They
++        // turn up only where a stretch of data has been taken for code --
++        // including inside the static functions N64Recomp creates itself, which
++        // no symbol map can correct. Failing the whole recompile over one lets
++        // a single mislabelled byte range block the entire game.
++        //
++        // Emit a trap instead: if such a function is ever genuinely reached it
++        // says so loudly, with its address, rather than doing something
++        // silently wrong.
++        print_indent();
++        fmt::print(output_file, "do_break(0x{:08X}); /* not reachable code */\n", instr_vram);
++        break;
+     // Cop0 (Limited functionality)
+     case InstrId::cpu_mfc0:
+         {

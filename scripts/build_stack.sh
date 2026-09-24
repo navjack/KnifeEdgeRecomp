@@ -54,6 +54,10 @@ apply_patch() {
     file=$4
     verify_patch "$patch"
     if grep -qF "$marker" "$ROOT/upstream/$repo/$file"; then
+        # Already applied, from this run or an earlier one. Still record the
+        # file: a later patch to the same file must not be refused for the edit
+        # this one made.
+        PATCHED_FILES="$PATCHED_FILES $repo/$file"
         return
     fi
     case " $PATCHED_FILES " in
@@ -77,6 +81,11 @@ apply_patch N64Recomp N64Recomp-cop0-registers.patch \
     "cop0_regs[32]" include/recomp.h
 apply_patch N64Recomp N64Recomp-fpu64-conversions.patch \
     "cpu_trunc_l_s" src/operations.cpp
+# Sits just after the cache no-op in the same switch, so it applies after it.
+apply_patch N64Recomp N64Recomp-cop0-control-trap.patch \
+    "cpu_INVALID" src/recompilation.cpp
+apply_patch N64Recomp N64Recomp-discard-bad-statics.patch \
+    "discarding static function" src/main.cpp
 # This one lands in recompilation.cpp too, which the cache-noop patch above has
 # already modified; apply_patch tracks that and checks it with git apply --check.
 apply_patch N64Recomp N64Recomp-zero-register-writes.patch \

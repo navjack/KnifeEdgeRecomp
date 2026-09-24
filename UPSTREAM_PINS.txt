@@ -24,3 +24,5 @@ patches/N64Recomp-cache-noop.patch.sha256 = 81764d4f4bc1ca55027b5a75eefffc022ae6
 patches/N64Recomp-cop0-registers.patch.sha256 = 0514e8dbcbe0dce7b0a75f7e46f186012f4b8d9aa580045fe770f9c5c822d99b
 patches/N64Recomp-fpu64-conversions.patch.sha256 = 3f086adcaa2bb413df7544ecaa4aa65a13d709e2efc4b7c98be3948bb3aae22a
 patches/N64Recomp-zero-register-writes.patch.sha256 = b261905db6843de5ae880c8a625cdf9fa7172d8ee9856b9c9cd4747723606606
+patches/N64Recomp-cop0-control-trap.patch.sha256 = 44a3e5e3975154e310d18ed7357f68c04e46857e3ac533d5c383cf264ae59ff7
+patches/N64Recomp-discard-bad-statics.patch.sha256 = 28111d409aabb58b0d468db280fbb40b9c83e0400b0eed824e4ed4a8f141f1a9
