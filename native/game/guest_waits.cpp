@@ -28,6 +28,13 @@
 #include <ultramodern/ultramodern.hpp>
 
 #include "recomp.h"
+#include <map>
+#include <mutex>
+#include <vector>
+#include <algorithm>
+#include <utility>
+#include <cstdlib>
+#include <cstdio>
 #include "guest_waits.h"
 #include "pipeline_trace.h"
 
@@ -41,6 +48,12 @@ constexpr uint32_t pending_gfx_tasks_vram = 0x8013C280;
 // Long enough that a stalled wait costs nothing, short enough to stay well
 // inside a 16.7 ms frame.
 constexpr uint32_t poll_interval_ms = 1;
+
+std::mutex sites_lock;
+std::map<uint32_t, long long>& sites() {
+    static std::map<uint32_t, long long> all;
+    return all;
+}
 
 }  // namespace
 
@@ -82,7 +95,38 @@ extern "C" void func_800D2B40(uint8_t* rdram, recomp_context* ctx) {
 // thread that was woken actually run. Both are what an os* call would have
 // done, which is the whole reason the loop works on hardware and not here.
 extern "C" void knife_edge_guest_poll(uint8_t* rdram, recomp_context* ctx) {
+    knife_edge_guest_poll_site(rdram, ctx, 0);
+}
+
+// Same, but recording which loop it was. A loop that turns once per frame is
+// waiting the way the hardware made it wait; one that turns many times per
+// frame is running the game faster than a 93.75 MHz R4300 ever could, which is
+// the shape of this game's well-known "too fast everywhere" problem. Telling
+// those apart needs a per-loop count, not a total.
+extern "C" void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
+                                           uint32_t site) {
     (void)ctx;
+    {
+        std::lock_guard<std::mutex> held(sites_lock);
+        sites()[site] += 1;
+    }
     ultramodern::wait_for_external_message_timed(rdram, poll_interval_ms);
     ultramodern::check_running_queue(rdram);
+}
+
+// Printed alongside the pipeline totals, so the counts can be read against the
+// retrace count from the same run.
+extern "C" void knife_edge_guest_waits_totals(void) {
+    if (std::getenv("KNIFE_EDGE_TRACE_PIPELINE") == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> held(sites_lock);
+    std::vector<std::pair<uint32_t, long long>> all(sites().begin(), sites().end());
+    std::sort(all.begin(), all.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    std::fprintf(stderr, "\n[waits] poll counts by loop, busiest first\n");
+    for (const auto& [site, count] : all) {
+        std::fprintf(stderr, "[waits]   0x%08X  %lld\n", site, count);
+    }
+    std::fflush(stderr);
 }

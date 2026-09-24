@@ -18,6 +18,9 @@ void func_800D2B40(uint8_t* rdram, recomp_context* ctx);
 /* [[patches.hook]] target for the game's other wait loops, which spin on a
  * flag without calling anything. Listed by tools/spin-scan. */
 void knife_edge_guest_poll(uint8_t* rdram, recomp_context* ctx);
+void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
+                                uint32_t site);
+void knife_edge_guest_waits_totals(void);
 
 #ifdef __cplusplus
 }
