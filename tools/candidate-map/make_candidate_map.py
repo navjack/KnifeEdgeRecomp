@@ -296,6 +296,46 @@ def region_is_code(rom_bytes, off, end_off):
     return known >= len(words) * 6 // 10
 
 
+def is_jump_or_branch(word):
+    """Does this word have a delay slot?"""
+    op = word >> 26
+    if op in (0x02, 0x03):                      # j, jal
+        return True
+    if op in (0x04, 0x05, 0x06, 0x07, 0x14, 0x15, 0x16, 0x17):
+        return True                             # beq/bne/blez/bgtz and likely
+    if op == 0x01:                              # regimm: bltz/bgez/bltzal/...
+        return True
+    if op == 0x11 and ((word >> 21) & 0x1F) == 0x08:
+        return True                             # bc1f/bc1t
+    if op == 0x00 and (word & 0x3F) in (0x08, 0x09):
+        return True                             # jr, jalr
+    return False
+
+
+def include_delay_slots(funcs, rom_bytes, sec_rom, sec_vram, sec_end):
+    """Never let a function end between a jump and its delay slot.
+
+    N64Recomp emits `goto after_N;` for a call in a delay slot and puts the
+    `after_N:` label on the instruction that follows. If the boundary falls
+    between the two, the label lands in the next function and the generated C
+    fails to compile with "use of undeclared label". Splitting at a call target
+    can land exactly there.
+    """
+    import struct as _struct
+    out = []
+    for name, vram, size in funcs:
+        end = vram + size
+        while end < sec_end:
+            off = sec_rom + (end - 4 - sec_vram)
+            if off < 0 or off + 4 > len(rom_bytes):
+                break
+            if not is_jump_or_branch(_struct.unpack(">I", rom_bytes[off:off + 4])[0]):
+                break
+            end += 4
+        out.append((name, vram, end - vram))
+    return out
+
+
 def looks_like_code(rom_bytes, off, limit):
     """Do the bytes at this offset plausibly begin a function?
 
@@ -491,6 +531,8 @@ def main():
                                    desc_sizes.get(rom, hi - lo))
         funcs = merge_across_branches(funcs, edges, targets, name,
                                       rom_bytes, rom, vram)
+        funcs = include_delay_slots(funcs, rom_bytes, rom, vram,
+                                    vram + desc_sizes.get(rom, hi - lo))
         total += len(funcs)
         split_total += len(funcs) - raw
         chunks += ["", "[[section]]", f'name = "{name}"',
