@@ -1,0 +1,72 @@
+# Hand-reviewed corrections to the structural name match, merged into
+# decomp/libultra-names.txt by tools/name-filter/classify_names.py.
+#
+# map-recovery's `match` hashes instruction bytes with the operands masked
+# out, so two libultra routines that differ only in an immediate hash the
+# same. That is a real limitation, not a bug: it is what lets the matcher
+# see through relocation. It does mean every MMIO accessor needs a human
+# to read the register address before its name is trusted.
+#
+#   deny <vram> <name>   the matcher proposed this name and it is wrong
+#   bind <vram> <name>   a binding read out of the disassembly by hand
+
+# __osSiDeviceBusy, not osPiGetStatus. Both are "read a status register,
+# test the busy bits, return 0 or 1", and the only thing separating them is
+# the lui immediate the hash masks off. This one reads SI_STATUS (0xA4800018
+# & 3); osPiGetStatus reads PI_STATUS. The runtime has no __osSiDeviceBusy
+# replacement, so it keeps its func_ name and stays recompiled -- which is
+# safe only because binding __osInitialize_common below leaves it unreached.
+deny 0x800E1380 osPiGetStatus
+
+# func_800D73E0 is __osInitialize_common, called once from the entrypoint
+# continuation func_800CD6B0. It is the canonical body:
+#   __osSetSR(__osGetSR() | SR_CU1)      func_800DB840 / func_800DB830
+#   __osSetFpcCsr(FPCSR_FS | FPCSR_EV)   func_800DB850, arg 0x01000800
+#   spin on __osSiRawReadIo(0x1FC007FC)  func_800DB860
+#   __osSiRawWriteIo(0x1FC007FC, v | 8)  func_800DB8B0
+#   copy the exception vectors to 0x80000000/80/100/180
+# The PIF RAM word at 0x1FC007FC is not RDRAM, so the recompiled read
+# faulted at rdram+0x3FC007FC. Naming it hands the whole sequence to the
+# runtime's osInitialize() and takes the entire SI cluster off the boot
+# path: every one of those five helpers is called from here and nowhere
+# else, so none of them is reached any more.
+bind 0x800D73E0 __osInitialize_common
+
+# The rest of the libultra boundary, read out of the disassembly rather than
+# waited for one crash at a time. Every function in the resident segment that
+# touches a hardware register was listed, then each was traced up its call
+# graph to the nearest libultra entry point the runtime implements. Binding
+# that entry point takes the whole MMIO subtree below it out of the build.
+#
+# What stays recompiled and unreachable as a result: the PI manager's raw DMA
+# and IO paths (func_800E00A0/03B0/2F80/3110, address-taken only inside
+# osCreatePiManager), the exception vector func_800DB900 (address-taken only
+# inside __osInitialize_common), the VI manager thread body func_800DA4F0 and
+# __osViInit func_800DB5A0, and the domain-register save func_800DA2FC.
+
+# osCreatePiManager(pri=150, cmdQ, cmdBuf, cmdMsgCnt=50), called from
+# func_800D1FA0 immediately before osCartRomInit. Sets OS_EVENT_PI, raises the
+# calling thread's priority, and installs the device manager's function
+# pointers. The runtime's replacement is deliberately empty -- ultramodern
+# services PI DMA synchronously and has no PI manager thread.
+bind 0x800DA180 osCreatePiManager
+
+# osAiSetFrequency: float dacRate computation, then AI_DACRATE + AI_BITRATE.
+bind 0x800D8BB0 osAiSetFrequency
+# osAiGetStatus / osAiGetLength: one-instruction reads of AI_STATUS and AI_LEN.
+# Both are called straight from the game's audio code at func_800CDE70, so
+# neither goes away by binding something above it.
+bind 0x800D8E40 osAiGetStatus
+bind 0x800D8E50 osAiGetLength
+
+# osCreateViManager: guarded by an init flag, creates the retrace and counter
+# message queues and fills OSIoMesg headers with types 13 (OS_MESG_TYPE_VRETRACE)
+# and 14 (OS_MESG_TYPE_COUNTER).
+bind 0x800DA370 osCreateViManager
+
+# osSpTaskYield: __osSpSetStatus(0x400), the SP_SET_SIG0 yield request.
+bind 0x800DA760 osSpTaskYield
+
+# osContStartReadData: __osSiGetAccess, build the read command, raw SI DMA out,
+# wait, raw SI DMA back, __osSiRelAccess.
+bind 0x800DAF00 osContStartReadData

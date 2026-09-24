@@ -55,6 +55,33 @@ def runtime_symbols():
     return {s.rstrip("(").strip() for s in out.splitlines()}
 
 
+def load_corrections():
+    """Hand-reviewed overrides of the structural match.
+
+    `match` hashes instructions with their operands masked, so it cannot
+    separate two libultra routines that differ only in an immediate -- an
+    MMIO accessor's register address, for instance. Those calls need a
+    person, and this is where their answer lives.
+    """
+    path = ROOT / "config/name-corrections.txt"
+    denied, bound = set(), []
+    if not path.exists():
+        return denied, bound
+    for line in path.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        verb, addr, name = line.split()
+        addr = addr.lower().removeprefix("0x")
+        if verb == "deny":
+            denied.add((addr, name))
+        elif verb == "bind":
+            bound.append(("match", addr, f"func_{addr.upper()}", name))
+        else:
+            raise SystemExit(f"{path}: unknown directive {verb!r}")
+    return denied, bound
+
+
 def main():
     apply_to = None
     if "--apply" in sys.argv:
@@ -66,6 +93,11 @@ def main():
         m = re.match(r"^(match|ambiguous)\s+0x([0-9A-Fa-f]+)\s+(\S+)\s+->\s+(\S+)", line)
         if m:
             proposals.append((m.group(1), m.group(2), m.group(3), m.group(4)))
+
+    denied, bound = load_corrections()
+    dropped = [p for p in proposals if (p[1].lower(), p[3]) in denied]
+    proposals = [p for p in proposals if (p[1].lower(), p[3]) not in denied]
+    proposals += bound
 
     verdicts = {}
     for status, addr, old, new in proposals:
@@ -82,6 +114,13 @@ def main():
         if status == "ambiguous":
             verdict, why = "REJECT", "ambiguous structural match"
         verdicts.setdefault(verdict, []).append((addr, old, new, why))
+
+    if dropped or bound:
+        print(f"\n=== corrections ({len(dropped)} denied, {len(bound)} bound by hand) ===")
+        for _status, addr, _old, name in sorted(dropped):
+            print(f"  deny 0x{addr.upper()} {name}")
+        for _status, addr, _old, name in sorted(bound):
+            print(f"  bind 0x{addr.upper()} {name}")
 
     for verdict in ("ADOPT", "REJECT", "SKIP"):
         rows = verdicts.get(verdict, [])
@@ -100,20 +139,38 @@ def main():
         # alone regenerates it a hundred times -- so an edit applied to the
         # generated file is silently undone, and the build quietly goes back to
         # recompiling the game's own libultra. That is exactly what happened:
-        # the guest's osPiGetStatus ran instead of the runtime's and faulted
-        # reading SI_STATUS at 0xA4800018, which is MMIO the runtime does not map.
+        # the guest's own SI code ran instead of the runtime's and faulted
+        # reading SI_STATUS at 0xA4800018, which is MMIO the runtime does not
+        # map. (The map called that function osPiGetStatus; it is really
+        # __osSiDeviceBusy -- see config/name-corrections.txt.)
+        # Merge, never replace. `match` only reports *renames*, so once a name
+        # is in the map it stops being proposed -- writing the file from one
+        # run's proposals alone would silently drop every name adopted before.
         out = ROOT / "decomp/libultra-names.txt"
+        merged = {}
+        if out.exists():
+            for line in out.read_text().splitlines():
+                line = line.split("#", 1)[0].strip()
+                if line:
+                    vram, name = line.split()
+                    merged[vram.lower().removeprefix("0x")] = name
+        for addr, _old, new_name, _why in adopt_rows:
+            merged[addr.lower()] = new_name
+        for addr, name in denied:
+            if merged.get(addr) == name:
+                del merged[addr]
         lines = [
             "# Addresses to name as libultra functions, applied by",
             "# tools/candidate-map/make_candidate_map.py so they survive",
             "# regeneration. Produced by tools/name-filter/classify_names.py,",
             "# which keeps only names N64Recomp recognises AND the runtime",
-            "# actually implements.",
+            "# actually implements. Hand corrections live in",
+            "# config/name-corrections.txt; edit those, not this file.",
         ]
-        for addr, _old, new, _why in sorted(set(adopt_rows)):
-            lines.append(f"0x{addr.upper()} {new}")
+        for addr in sorted(merged, key=lambda a: int(a, 16)):
+            lines.append(f"0x{addr.upper()} {merged[addr]}")
         out.write_text("\n".join(lines) + "\n")
-        print(f"\nwrote {len(set((r[0], r[2]) for r in adopt_rows))} name(s) to {out}")
+        print(f"\nwrote {len(merged)} name(s) to {out}")
     return 0
 
 
