@@ -3,7 +3,11 @@
 set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/common.sh"
 
-"$SCRIPT_DIR/recompile.sh"
+CANDIDATE_ARG=""
+if [ "${1:-}" = "--candidate" ]; then
+    CANDIDATE_ARG="--candidate"
+fi
+"$SCRIPT_DIR/recompile.sh" $CANDIDATE_ARG
 
 GENERATED="$ROOT/generated"
 for required in funcs.h lookup.cpp recomp_overlays.inl; do
@@ -29,6 +33,12 @@ echo "Configuring native macOS app"
     -DCMAKE_PREFIX_PATH=/opt/homebrew \
     -DKNIFE_EDGE_ROOT="$ROOT"
 "$CMAKE_BIN" --build "$BUILD_DIR" --parallel 8
+
+if [ -f "$GENERATED/CANDIDATE_BUILD" ]; then
+    echo
+    echo "NOTE: built from the unreviewed candidate map ($(cat "$GENERATED/CANDIDATE_BUILD"))."
+    echo "      Treat any run of this bundle as a runtime smoke test only."
+fi
 
 APP="$BUILD_DIR/${GAME_ID}.app"
 test -d "$APP"
