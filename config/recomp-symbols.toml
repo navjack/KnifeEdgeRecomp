@@ -6,7 +6,7 @@ symbols_file_path = "../input/knife-edge.syms.toml"
 output_func_path = "../generated"
 entrypoint = 0x800C2400
 functions_per_output_file = 50
-recomp_include = "#include \"recomp.h\""
+recomp_include = "#include \"recomp.h\"\n#include \"game/overlay_bridge.h\""
 uses_mips3_float_mode = false
 relocatable_sections_path = "relocatable-sections.txt"
 
@@ -29,7 +29,24 @@ stubs = [
     "func_800DC074",
     "func_800DC280",
     "func_800DC2D0",
-    "func_800DB900",  # __osException, and 800DBE34 is a second entry into the
-    "func_800DBE34",  # same handwritten routine (it branches back to 800DBDEC)
+    # __osException. Its second entry at 0x800DBE34 branches back to 0x800DBDEC,
+    # so the candidate generator's widening absorbs it into this function and it
+    # must NOT be listed separately -- N64Recomp hard-errors on a stub naming a
+    # function that does not exist.
+    "func_800DB900",
     "func_800DBF1C",
 ]
+
+[[patches.hook]]
+# Register runtime-loaded overlays. librecomp never watches DMA, so without this
+# every overlay is invisible to get_function, which aborts the process rather
+# than failing softly.
+#
+# All four of the game's overlay loaders funnel through func_800D1D10, a
+# blocking DMA helper, so one hook covers every load with (rom, dest, size)
+# already in hand. 0x800D1D80 is the instruction after osRecvMesg returns and
+# before the epilogue: the bytes are in RDRAM and sp still addresses the frame
+# holding the spilled arguments.
+func = "func_800D1D10"
+before_vram = 0x800D1D80
+text = "knife_edge_overlay_dma(rdram, ctx);"

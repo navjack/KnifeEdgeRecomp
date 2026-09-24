@@ -139,53 +139,195 @@ def split_at_targets(funcs, targets):
     return out
 
 
-def merge_across_branches(funcs, edges, protected):
-    """Extend each function until every branch out of it lands inside it.
+def merge_across_branches(funcs, edges, protected, section_name):
+    """Widen each function until every branch out of it lands inside it.
 
-    Splat ends a function at the next label, which cuts handwritten routines
-    that branch across that point; N64Recomp then rejects the whole function
-    with "Unhandled branch ... to 0x...". `.L` labels are intra-function by
+    Splat ends a function at the next label, which cuts routines that branch
+    across that point; N64Recomp then rejects the whole function with
+    "Unhandled branch ... to 0x...". `.L` labels are intra-function by
     construction, so a target past the end always means the boundary is wrong.
 
-    Functions that something calls are never absorbed -- a call target is an
-    entry point, and removing it puts N64Recomp back to "No function found for
-    jal target". Where the two rules disagree, the call target wins: a branch
-    only has to land inside *a* function, while a call has to resolve to an
-    exact address.
+    Widening, rather than absorbing, is what handles a multiple-entry routine.
+    `func_8016DCD4` is an `alabel` -- an alternate entry, called from three
+    sites -- sitting inside a routine that also branches across it. Absorbing it
+    loses the entry point ("No function found for jal target"); refusing to
+    cross it loses the branch. Both are satisfied by letting the ranges overlap:
+    each entry is recompiled from its own start, and the shared tail is emitted
+    twice, which is exactly what the original assembly means.
+
+    Functions that nothing calls and that end up wholly inside a widened
+    neighbour are Splat artifacts and are dropped, so overlap stays confined to
+    real alternate entries.
     """
     if not funcs:
         return funcs
     funcs = sorted(funcs, key=lambda f: f[1])
+    section_end = max(v + sz for _, v, sz in funcs)
+    # A branch needs one function containing both of its ends, so widen in both
+    # directions: forward for a branch leaving the bottom, and -- for a branch
+    # arriving from below the start -- widen whichever function owns the target
+    # until it also covers the source.
     by_src = {}
+    by_dst = {}
     for src, dst in edges:
         by_src.setdefault(src, []).append(dst)
+        by_dst.setdefault(dst, []).append(src)
 
-    section_end = max(v + sz for _, v, sz in funcs)
-    out = []
-    i = 0
-    while i < len(funcs):
-        name, vram, size = funcs[i]
-        while True:
+    # Widening must stay bounded. A `.L` reference can chain far enough to run a
+    # function off the end of the code and into data, where N64Recomp decodes a
+    # data word as a branch to somewhere impossible ("Unhandled branch ... to
+    # 0x883EAA58"). Splat's own extent is the anchor; allow generous growth for
+    # a split routine but not unbounded growth.
+    MAX_GROWTH = 0x1000
+    original_end = {vram: vram + size for _, vram, size in funcs}
+    widened = [[name, vram, size] for name, vram, size in funcs]
+    changed = True
+    while changed:
+        changed = False
+        for entry in widened:
+            _, vram, size = entry
             end = vram + size
-            reach = max((d for src, dsts in by_src.items() if vram <= src < end
-                         for d in dsts), default=0)
+            forward = max((d for src, dsts in by_src.items() if vram <= src < end
+                           for d in dsts), default=0)
+            backward = max((src for dst, srcs in by_dst.items() if vram <= dst < end
+                            for src in srcs), default=0)
+            reach = max(forward, backward)
             if reach < end:
-                break
-            # Extend to cover the target. Splat sometimes calls the bytes in
-            # between data, so there may be no adjacent function to absorb --
-            # extend anyway, but never past the next call target, which is a
-            # real entry point, nor past the end of the section.
-            limit = min((f[1] for f in funcs[i + 1:]
-                         if f[1] in protected and f[1] > vram), default=section_end)
-            new_end = min(reach + 4, limit)
-            if new_end <= end:
-                break
-            size = new_end - vram
-            while i + 1 < len(funcs) and funcs[i + 1][1] < vram + size:
-                i += 1
+                continue
+            new_end = min(reach + 4, section_end,
+                          original_end[vram] + MAX_GROWTH)
+            if new_end > end:
+                entry[2] = new_end - vram
+                changed = True
+
+        # A body that branches above its own start can only be absorbed, never
+        # made self-contained. Widen whichever function owns the target so it
+        # covers this one entirely -- covering just the branch is not enough,
+        # since the enclosing function has to swallow the whole alternate entry
+        # for it to be droppable below.
+        for _, vram, size in widened:
+            end = vram + size
+            escapes = [dst for src, dsts in by_src.items() if vram <= src < end
+                       for dst in dsts if dst < vram]
+            if not escapes:
+                continue
+            target = min(escapes)
+            owner = None
+            for candidate in widened:
+                if candidate[1] <= target and (owner is None or candidate[1] > owner[1]):
+                    owner = candidate
+            if owner is not None and owner[1] + owner[2] < end:
+                capped = min(end, section_end,
+                             original_end[owner[1]] + MAX_GROWTH)
+                if capped > owner[1] + owner[2]:
+                    owner[2] = capped - owner[1]
+                    changed = True
+
+    out = []
+    for name, vram, size in widened:
+        size = SIZE_OVERRIDES.get((section_name, vram), size)
+        if size == 0:
+            # An override of 0 drops the entry: Splat called a stretch of data a
+            # function, and no valid extent exists for it.
+            continue
+        end = vram + size
+        covered_by = [(v, sz) for _, v, sz in widened
+                      if v < vram and v + sz >= end]
+
+        # An alternate entry whose body branches above its own start cannot be
+        # expressed: a recompiled function may not branch outside itself, and
+        # its start is fixed because something calls it. func_8016FBCC is one --
+        # an `alabel` at 0x8016FBCC branching back to 0x8016FBC4, eight bytes
+        # earlier. The enclosing function already covers both ends correctly, so
+        # drop the entry and let N64Recomp's resolve_jal create a static
+        # function for the call site instead.
+        escapes_below = any(vram <= src < end and dst < vram
+                            for src, dsts in by_src.items() for dst in dsts)
+        if escapes_below and covered_by:
+            continue
+
+        # Anything nothing calls that ends up wholly inside a widened neighbour
+        # is a Splat artifact, so overlap stays confined to real alternate
+        # entries.
+        if vram not in protected and covered_by:
+            continue
         out.append((name, vram, size))
-        i += 1
     return out
+
+
+JR_RA = 0x03E00008
+
+# Addresses this generator cannot produce a valid function for, with the reason.
+# Each one is a real routine, not a boundary mistake -- the shapes simply have no
+# expression as a standalone recompiled function. Dropping the entry leaves the
+# call sites to N64Recomp's resolve_jal, which creates a static function at the
+# target when it is in the calling section.
+#
+# This is a candidate-map limitation. A reviewed map resolves these by hand.
+# Function extents this generator gets wrong, as `0xVRAM 0xSIZE` lines in
+# decomp/size-overrides.txt. Dropping such a function is not an option when its
+# callers live in another section, because resolve_jal can only create a static
+# for a call from within the same section.
+#
+# The file is produced by tools/candidate-map/converge.py, which reads the exact
+# extent each failure requires straight out of N64Recomp's own diagnostics
+# rather than guessing.
+def load_size_overrides(root):
+    path = root / "decomp/size-overrides.txt"
+    overrides = {}
+    if not path.exists():
+        return overrides
+    for line in path.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        section, vram, size = line.split()
+        # Keyed by section as well as address: eight overlays share 0x8017B0C0,
+        # and an extent that is right in one is data in another.
+        overrides[(section, int(vram, 16))] = int(size, 16)
+    return overrides
+
+
+SIZE_OVERRIDES = {}
+
+
+def synthesize_missing(funcs, targets, rom_bytes, sec_rom, sec_vram, sec_size):
+    """Invent a function at any call target no function covers.
+
+    Splat only disassembles what it recognises as code, so a routine reached
+    solely from another overlay can sit in a stretch it filed as data. Nothing
+    can then split it out, and N64Recomp fails the caller with "No function
+    found for jal target". Scan from the target to its terminating `jr $ra` and
+    add a function, but only when the bytes really do end like a function --
+    otherwise this would paper over a genuinely wrong section boundary.
+    """
+    import struct
+    covered = [(v, v + sz) for _, v, sz in funcs]
+    starts = {v for _, v, _ in funcs}
+    added = []
+    for target in sorted(targets):
+        if not (sec_vram <= target < sec_vram + sec_size):
+            continue
+        if target in starts or any(lo <= target < hi for lo, hi in covered):
+            continue
+        off = sec_rom + (target - sec_vram)
+        limit = min(off + 0x2000, sec_rom + sec_size, len(rom_bytes))
+        end = None
+        for pc in range(off, limit - 4, 4):
+            if struct.unpack(">I", rom_bytes[pc:pc + 4])[0] == JR_RA:
+                end = pc + 8  # include the delay slot
+                break
+        if end is None:
+            continue
+        # Do not run into a function that already exists.
+        following = [v for _, v, _ in funcs if v > target]
+        if following:
+            end = min(end, sec_rom + (min(following) - sec_vram))
+        size = end - off
+        if size <= 0:
+            continue
+        added.append((f"func_{target:08X}", target, size))
+    return funcs + added
 
 
 def descriptor_sizes(root):
@@ -233,6 +375,8 @@ def main():
     segs = [("entry", 0x1000, 0x800C2400), ("main", 0x1050, 0x800C2450)]
     segs += code_segments(root / "splat.yaml")
     desc_sizes = descriptor_sizes(root)
+    rom_bytes = (root / "rom/Knife Edge - Nose Gunner (U) [!].z64").read_bytes()
+    SIZE_OVERRIDES.update(load_size_overrides(root))
 
     chunks = [
         "# Candidate map generated from Splat control-flow boundaries by",
@@ -268,16 +412,24 @@ def main():
         hi = max((v + sz for _, v, sz in funcs), default=vram)
         targets = (call_targets(src) | resident_targets |
                    {t for t in all_targets if lo <= t < hi})
-        funcs = merge_across_branches(
-            split_at_targets(funcs, targets), edges, targets)
+        funcs = split_at_targets(funcs, targets)
+        funcs = synthesize_missing(funcs, targets, rom_bytes, rom, vram,
+                                   desc_sizes.get(rom, hi - lo))
+        funcs = merge_across_branches(funcs, edges, targets, name)
         total += len(funcs)
         split_total += len(funcs) - raw
         chunks += ["", "[[section]]", f'name = "{name}"',
                    f"rom = 0x{rom:X}", f"vram = 0x{vram:X}"]
-        end = max((v + s for _, v, s in funcs), default=vram)
-        size = max(end - vram, desc_sizes.get(rom, 0))
+        # The ROM descriptor says how many bytes are loaded, and nothing may
+        # claim more: letting a function extent widen the section once inflated
+        # ovl_1B66F0 to 136 MB after a data word was decoded as a branch.
+        extent = max((v + s for _, v, s in funcs), default=vram)
+        size = desc_sizes.get(rom) or (extent - vram)
         chunks.append(f"size = 0x{size:X}")
         chunks.append("functions = [")
+        section_end = vram + size
+        funcs = [(n, v, min(sz, section_end - v)) for n, v, sz in funcs
+                 if v < section_end and min(sz, section_end - v) > 0]
         for fname, fvram, fsize in sorted(funcs, key=lambda f: f[1]):
             # Overlays that share a destination produce the same func_XXXXXXXX
             # name in several sections, and the C generator emits one definition

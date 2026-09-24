@@ -33,6 +33,7 @@
 #include "recompui/program_config.h"
 #include "recompui/recompui.h"
 #include "recompui/renderer.h"
+#include "game/overlay_bridge.h"
 #include "rsp_contract.hpp"
 #include "ultramodern/ultramodern.hpp"
 #include "util/file.h"
@@ -493,6 +494,9 @@ int main(int argc, char** argv) {
         .is_enabled = true,
         .entrypoint_address = get_entrypoint_address(),
         .entrypoint = recomp_entrypoint,
+        // Runs after librecomp's init(), so after the boot-time 1 MB
+        // load_overlays whose overlay registrations this undoes.
+        .on_init_callback = knife_edge_neutralize_boot_overlays,
     });
     if (!recomp::register_game(supported_games[0])) {
         std::fprintf(stderr, "Failed to register the game\n");
