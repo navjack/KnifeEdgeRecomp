@@ -14,6 +14,7 @@ established about the ROM.
 ./scripts/bootstrap_decomp.sh            # splat venv
 ./scripts/split_rom.sh                   # regenerate asm/ and assets/
 ./scripts/generate_candidate_symbols.sh  # unreviewed probe map
+./scripts/generate_rsp.sh                # RSPRecomp -> rsp/*.cpp (committed)
 ./scripts/recompile.sh                   # N64Recomp -> generated/
 ./scripts/build_app.sh                   # configure, build, package the .app
 ./scripts/verify_release_app.sh          # static checks on the packaged bundle
