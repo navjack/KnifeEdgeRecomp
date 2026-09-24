@@ -7,7 +7,7 @@ symbols_file_path = "../decomp/knife-edge.candidate.syms.toml"
 output_func_path = "../generated-candidate"
 entrypoint = 0x800C2400
 functions_per_output_file = 50
-recomp_include = "#include \"recomp.h\"\n#include \"game/overlay_bridge.h\""
+recomp_include = "#include \"recomp.h\"\n#include \"game/overlay_bridge.h\"\n#include \"game/pipeline_trace.h\"\n#include \"game/guest_waits.h\""
 uses_mips3_float_mode = false
 # relocatable_sections_path is deliberately NOT set.
 #
@@ -24,6 +24,17 @@ uses_mips3_float_mode = false
 # swapped at runtime; wire it back up if real relocs ever become available.
 
 [patches]
+# Replaced natively rather than recompiled, which is what `ignored` is for: the
+# body is dropped but the name is not renamed, so every call site emits
+# func_800D2B40(rdram, ctx) and native/game/guest_waits.cpp supplies it.
+#
+# func_800D2B40 busy-waits on a pending-task count and calls nothing at all, so
+# a faithful recompile never drains the runtime's external message queue and
+# the SP/DP completions it is waiting for are never delivered.
+ignored = [
+    "func_800D2B40",
+]
+
 stubs = [
     # TLB and exception-vector routines. These intentionally leave the normal C
     # execution domain (tlbp/tlbr/tlbwi/eret), and after static recompilation
@@ -55,3 +66,41 @@ stubs = [
 func = "func_800D1D10"
 before_vram = 0x800D1D80
 text = "knife_edge_overlay_dma(rdram, ctx);"
+
+# Graphics pipeline probes. The boot thread posts one display list and then
+# busy-waits on the pending count at 0x8013C280; when that count never drains,
+# every thread in the chain is parked in osRecvMesg and a backtrace cannot say
+# which step was the last one reached. These say it directly. See
+# native/game/pipeline_trace.cpp; they are silent without
+# KNIFE_EDGE_TRACE_PIPELINE.
+
+[[patches.hook]]
+# Right after func_800D1BB4's osSendMesg to the scheduler queue at 0x801423EC.
+func = "func_800D1BB4"
+before_vram = 0x800D1CE4
+text = "knife_edge_pipeline_submitted(rdram, ctx);"
+
+[[patches.hook]]
+# func_800D2460's first osSpTaskStartGo returning.
+func = "func_800D2460"
+before_vram = 0x800D2528
+text = "knife_edge_pipeline_started(rdram, ctx);"
+
+[[patches.hook]]
+# func_800D2460's second osSpTaskStartGo returning.
+func = "func_800D2460"
+before_vram = 0x800D2574
+text = "knife_edge_pipeline_started(rdram, ctx);"
+
+[[patches.hook]]
+# func_800D25F0's osSpTaskStartGo returning.
+func = "func_800D25F0"
+before_vram = 0x800D26D8
+text = "knife_edge_pipeline_started(rdram, ctx);"
+
+[[patches.hook]]
+# func_800D1730 about to store the decremented pending count, the write that
+# releases the busy-wait in func_800D2B40.
+func = "func_800D1730"
+before_vram = 0x800D1824
+text = "knife_edge_pipeline_completed(rdram, ctx);"

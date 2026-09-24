@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -65,6 +66,21 @@ std::ofstream trace_file;
 std::ofstream function_trace_file;
 std::atomic_uint64_t vi_count = 0;
 uint64_t stop_after_vi = 0;
+
+// Guest words to sample once per VI, appended to the trace as extra columns.
+// The point is to watch the game's own state evolve without a debugger: a
+// pending-work counter that never drains, or a message queue whose validCount
+// sticks at 1, says far more than a backtrace of a thread that is merely
+// parked. Captured from the render-context callback, the one place the
+// frontend is handed the RDRAM base.
+std::vector<uint32_t> watch_addresses;
+std::atomic<uint8_t*> watched_rdram{nullptr};
+
+int32_t read_guest_word(uint8_t* rdram, uint32_t vram) {
+    int32_t value{};
+    std::memcpy(&value, rdram + (vram & 0x3FFFFFFFu), sizeof(value));
+    return value;
+}
 std::filesystem::path autoboot_rom_path;
 
 // A scripted input segment holds its buttons and stick for guest VIs
@@ -266,11 +282,39 @@ void vi_callback() {
         trace_file << current_vi << ',' << (ultramodern::is_game_started() ? 1 : 0)
                    << ',' << audio_frequency.load(std::memory_order_relaxed)
                    << ',' << audio_buffers_queued.load(std::memory_order_relaxed)
-                   << ',' << audio_nonzero_samples_queued.load(std::memory_order_relaxed) << '\n';
+                   << ',' << audio_nonzero_samples_queued.load(std::memory_order_relaxed);
+        uint8_t* const rdram = watched_rdram.load(std::memory_order_relaxed);
+        for (const uint32_t address : watch_addresses) {
+            trace_file << ',';
+            if (rdram != nullptr) {
+                trace_file << read_guest_word(rdram, address);
+            }
+        }
+        trace_file << '\n';
         trace_file.flush();
     }
     if (stop_after_vi != 0 && current_vi >= stop_after_vi) {
-        ultramodern::quit();
+        // Leave immediately rather than unwinding. recomp::start joins the
+        // game thread and the event threads on the way out, but never the
+        // guest OSThreads osCreateThread spawned, so they keep running while
+        // it unmaps RDRAM underneath them -- every bounded run ended in a
+        // SIGSEGV that had nothing to do with the game, and enough of them in
+        // a row got macOS to start showing its "reopen windows?" dialog on
+        // launch, which blocks the next run in SDL_CreateWindow.
+        //
+        // A bounded run is a deliberate stop, not a shutdown, so there is
+        // nothing to unwind: flush what the run was asked to record and go.
+        // Closing the window normally still takes the ordinary path.
+        if (trace_file.is_open()) {
+            std::lock_guard lock{trace_mutex};
+            trace_file.flush();
+        }
+        if (function_trace_file.is_open()) {
+            std::lock_guard lock{trace_mutex};
+            function_trace_file.flush();
+        }
+        std::fflush(nullptr);
+        std::_Exit(EXIT_SUCCESS);
     }
 }
 
@@ -341,6 +385,19 @@ bool parse_runtime_options(int argc, char** argv) {
             }
             stop_after_vi = static_cast<uint64_t>(value);
         }
+        else if (argument == "--watch") {
+            if (!has_value) {
+                std::fprintf(stderr, "--watch requires a guest address\n");
+                return false;
+            }
+            char* end = nullptr;
+            const unsigned long long value = std::strtoull(argv[++i], &end, 16);
+            if (end == argv[i] || *end != '\0') {
+                std::fprintf(stderr, "Invalid --watch address: '%s'\n", argv[i]);
+                return false;
+            }
+            watch_addresses.push_back(static_cast<uint32_t>(value));
+        }
         else if (argument == "--trace-output") {
             if (!has_value) {
                 std::fprintf(stderr, "--trace-output requires a file path\n");
@@ -351,7 +408,11 @@ bool parse_runtime_options(int argc, char** argv) {
                 std::fprintf(stderr, "Unable to open trace output '%s'\n", argv[i]);
                 return false;
             }
-            trace_file << "vi,game_started,audio_frequency,audio_buffers,audio_nonzero_samples\n";
+            trace_file << "vi,game_started,audio_frequency,audio_buffers,audio_nonzero_samples";
+            for (const uint32_t address : watch_addresses) {
+                trace_file << ",0x" << std::hex << address << std::dec;
+            }
+            trace_file << '\n';
         }
         else if (argument == "--function-trace-output") {
             if (!has_value) {
@@ -532,6 +593,7 @@ int main(int argc, char** argv) {
         .renderer_callbacks = {
             .create_render_context = [](uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle,
                                         bool developer_mode) {
+                watched_rdram.store(rdram, std::memory_order_relaxed);
                 return recompui::renderer::create_render_context(
                     rdram, window_handle, ultramodern::renderer::PresentationMode::Console, developer_mode);
             },

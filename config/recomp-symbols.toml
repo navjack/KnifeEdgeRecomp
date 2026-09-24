@@ -6,7 +6,7 @@ symbols_file_path = "../input/knife-edge.syms.toml"
 output_func_path = "../generated"
 entrypoint = 0x800C2400
 functions_per_output_file = 50
-recomp_include = "#include \"recomp.h\"\n#include \"game/overlay_bridge.h\""
+recomp_include = "#include \"recomp.h\"\n#include \"game/overlay_bridge.h\"\n#include \"game/pipeline_trace.h\"\n#include \"game/guest_waits.h\""
 uses_mips3_float_mode = false
 # relocatable_sections_path is deliberately NOT set.
 #

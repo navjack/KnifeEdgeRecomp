@@ -41,6 +41,12 @@ set_plist CFBundleVersion string 0.1.0
 set_plist LSMinimumSystemVersion string 13.0
 set_plist NSHighResolutionCapable bool true
 set_plist LSApplicationCategoryType string public.app-category.games
+# A game has no document state worth restoring, and opting out of persistent UI
+# means a crash never leaves macOS prompting "reopen windows?" on the next
+# launch -- a prompt that blocks the app inside SDL_CreateWindow, which turns
+# one crash into every later run hanging before it draws anything.
+set_plist NSQuitAlwaysKeepsWindows bool false
+set_plist NSSupportsSuddenTermination bool true
 
 # Copy every Homebrew dylib a binary links against into Frameworks, repoint the
 # binary at the bundled copy, and repeat for that copy's own links.
