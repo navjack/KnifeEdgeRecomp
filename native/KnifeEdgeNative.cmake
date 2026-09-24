@@ -145,6 +145,7 @@ function(knife_edge_add_native_app)
     set(APP_TARGET "${KNIFE_EDGE_GAME_ID}_recompiled")
     add_executable(${APP_TARGET} MACOSX_BUNDLE
         "${NATIVE_ROOT}/main.cpp"
+        "${NATIVE_ROOT}/macos_menu.mm"
         "${NATIVE_ROOT}/register_generated.cpp"
         "${GENERATED_DIR}/lookup.cpp"
         ${RSP_SOURCES}

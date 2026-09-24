@@ -25,6 +25,7 @@
 #include "librecomp/game.hpp"
 #include "nfd.h"
 #include "recomp.h"
+#include "macos_menu.h"
 #include "recompinput/input_events.h"
 #include "recompinput/input_mapping.h"
 #include "recompinput/input_state.h"
@@ -115,6 +116,8 @@ void* create_gfx() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK) != 0) {
         fail("SDL initialization failed");
     }
+    // After SDL_Init, because that is what creates the NSApplication.
+    knife_edge_install_macos_menu(KNIFE_EDGE_DISPLAY_NAME);
     return nullptr;
 }
 
@@ -527,6 +530,36 @@ extern "C" void knife_edge_trace_return(const char* function_name) {
     }
 }
 
+// Once the game is running, SDL_QUIT opens a confirmation prompt instead of
+// quitting -- which is unusable if rendering is broken, because the prompt is
+// part of what is not being drawn. An app you cannot quit is broken no matter
+// what else is wrong, so a second Cmd-Q means it: the first still asks, and
+// pressing it again within a few seconds leaves immediately.
+//
+// It leaves the same way a bounded run does, with _Exit after a flush, because
+// the ordinary teardown is the one that unmaps RDRAM out from under guest
+// threads it never joined.
+int SDLCALL quit_watch(void*, SDL_Event* event) {
+    if (event == nullptr || event->type != SDL_QUIT) {
+        return 0;
+    }
+    using namespace std::chrono;
+    static steady_clock::time_point first_request{};
+    const auto now = steady_clock::now();
+    if (first_request != steady_clock::time_point{} &&
+        now - first_request < seconds{5}) {
+        std::fprintf(stderr, "Quit requested twice; exiting without unwinding.\n");
+        if (trace_file.is_open()) {
+            std::lock_guard lock{trace_mutex};
+            trace_file.flush();
+        }
+        std::fflush(nullptr);
+        std::_Exit(EXIT_SUCCESS);
+    }
+    first_request = now;
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (!parse_runtime_options(argc, argv)) {
         return EXIT_FAILURE;
@@ -549,6 +582,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    SDL_AddEventWatch(quit_watch, nullptr);
     NFD_Init();
 
     const std::u8string controller_db_path =

@@ -32,7 +32,10 @@ void report(const char* step, std::atomic<int>& seen) {
         return;
     }
     const int count = seen.fetch_add(1) + 1;
-    if (count <= report_limit) {
+    // After the first few, report periodically instead of stopping: whether a
+    // step happens at all is one question, and whether it keeps happening at
+    // frame rate is a different one. 300 is about five seconds of NTSC.
+    if (count <= report_limit || count % 300 == 0) {
         std::fprintf(stderr, "[pipeline] %s (%d)\n", step, count);
         std::fflush(stderr);
     }
