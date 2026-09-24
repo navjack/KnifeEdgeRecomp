@@ -7,8 +7,9 @@
 
 #include "recomp_overlays.inl"
 
-// Provided by the generated code.
-extern "C" gpr get_entrypoint_address();
+// Provided by the generated lookup.cpp, with C++ linkage -- declared the same
+// way in native/main.cpp.
+gpr get_entrypoint_address();
 
 namespace {
 

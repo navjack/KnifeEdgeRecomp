@@ -1,8 +1,7 @@
 diff --git a/src/main.cpp b/src/main.cpp
-index 669c4a1..141013e 100644
 --- a/src/main.cpp
 +++ b/src/main.cpp
-@@ -886,8 +886,20 @@ int main(int argc, char** argv) {
+@@ -886,8 +886,27 @@
              }
  
              if (result == false) {
@@ -15,12 +14,19 @@ index 669c4a1..141013e 100644
 +                // mentioned the function. Stopping the whole build over one
 +                // lets a single mislabelled byte range block an entire game.
 +                //
-+                // Warn and carry on. If the target really was code, the call
++                // The partial body is already written and cannot be taken back,
++                // so close it: the statements emitted so far are complete, only
++                // the terminator is missing, and an unbalanced brace breaks the
++                // whole file. Any label a surviving `goto` needs is added by
++                // tools/candidate-map/fix_dangling_labels.py, which knows which
++                // ones are actually missing.
++                //
++                // Carry on afterwards. If the target really was code, the call
 +                // fails at run time with a specific "Failed to find function at
-+                // 0x..." instead, which is a far more localised problem than
-+                // having no build at all.
++                // 0x...", which is far more localised than having no build.
 +                fmt::print(stderr, "Warning: discarding static function {} "
 +                                   "(target is probably data)\n", new_func.name);
++                fmt::print(current_output_file, "\n    do_break(0x{:08X});\n;}}\n", new_func.vram);
 +                continue;
              }
          }

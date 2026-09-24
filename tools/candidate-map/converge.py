@@ -28,6 +28,11 @@ ROM = ROOT / "rom/Knife Edge - Nose Gunner (U) [!].z64"
 MAP = ROOT / "decomp/knife-edge.candidate.syms.toml"
 
 BRANCH_RE = re.compile(r"Unhandled branch in (\S+) at 0x([0-9A-F]+) to 0x([0-9A-F]+)")
+# N64Recomp only warns about this one, but still emits the `goto`, so the
+# generated C fails to compile with "use of undeclared label". Same defect,
+# same fix -- and invisible unless the build is actually run.
+WARN_BRANCH_RE = re.compile(
+    r"Function (\S+) is branching outside of the function \(to 0x([0-9A-F]+)\)")
 JTBL_RE = re.compile(r"Failed to determine size of jump table at 0x([0-9A-F]+) "
                      r"for instruction at 0x([0-9A-F]+)")
 ANALYZE_RE = re.compile(r"Failed to analyze (\S+)")
@@ -145,7 +150,8 @@ def main():
             print("\n".join(l for l in text.splitlines()
                              if not l.startswith("[Info]"))[-1500:])
             return 1
-        if probe.returncode == 0 and "Error recompiling" not in text:
+        if (probe.returncode == 0 and "Error recompiling" not in text
+                and not WARN_BRANCH_RE.search(text)):
             for artifact in ("funcs.h", "lookup.cpp", "recomp_overlays.inl"):
                 if not (ROOT / "generated-candidate" / artifact).exists():
                     print(f"round {attempt}: exit 0 but {artifact} missing")
@@ -155,7 +161,9 @@ def main():
             return 0
 
         added = []
-        for name, _src, dst in BRANCH_RE.findall(text):
+        branch_hits = [(n, d) for n, _s, d in BRANCH_RE.findall(text)]
+        branch_hits += WARN_BRANCH_RE.findall(text)
+        for name, dst in branch_hits:
             fm = FUNC_RE.match(name)
             if not fm:
                 continue
@@ -179,6 +187,19 @@ def main():
                     added.append((section, vram, 0,
                                   f"not code: branch to 0x{dst} is impossible "
                                   f"even at Splat's size"))
+                continue
+            if target < vram:
+                # Branches above its own start: the extent begins too late, and
+                # the start cannot move because something calls it. Pull back to
+                # Splat's size; the enclosing function covers both ends.
+                anchor = splat_size(section, vram)
+                if anchor and current_overrides().get((section, vram)) != anchor:
+                    added.append((section, vram, anchor,
+                                  f"branches back to 0x{dst}, before its start"))
+                elif callers_in_section(section, vram) == 0:
+                    added.append((section, vram, 0,
+                                  f"branches back to 0x{dst} and nothing here "
+                                  f"calls it"))
                 continue
             need = target + 4 - vram
             if need > 0:

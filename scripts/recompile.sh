@@ -37,6 +37,7 @@ if [ "$CANDIDATE" -eq 1 ]; then
     rm -rf "$GENERATED"
     cp -R "$ROOT/generated-candidate" "$GENERATED"
     date > "$GENERATED/CANDIDATE_BUILD"
+    python3 "$ROOT/tools/candidate-map/fix_dangling_labels.py" "$GENERATED"
     grep -ohE '\b[A-Za-z_][A-Za-z0-9_]*_recomp\(rdram, ctx\)' "$GENERATED"/*.c \
         | sed 's/(rdram, ctx)$//' \
         | sort -u \
