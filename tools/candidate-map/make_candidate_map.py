@@ -139,7 +139,8 @@ def split_at_targets(funcs, targets):
     return out
 
 
-def merge_across_branches(funcs, edges, protected, section_name):
+def merge_across_branches(funcs, edges, protected, section_name,
+                          rom_bytes, sec_rom, sec_vram):
     """Widen each function until every branch out of it lands inside it.
 
     Splat ends a function at the next label, which cuts routines that branch
@@ -196,6 +197,9 @@ def merge_across_branches(funcs, edges, protected, section_name):
                 continue
             new_end = min(reach + 4, section_end,
                           original_end[vram] + MAX_GROWTH)
+            if new_end > end and not region_is_code(
+                    rom_bytes, sec_rom + (end - vram), sec_rom + (new_end - vram)):
+                continue
             if new_end > end:
                 entry[2] = new_end - vram
                 changed = True
@@ -256,6 +260,40 @@ def merge_across_branches(funcs, edges, protected, section_name):
 
 
 JR_RA = 0x03E00008
+
+
+# Primary opcodes IDO actually emits. Data decodes as a scatter of everything.
+COMMON_OPS = {
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+    0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x14, 0x15, 0x16, 0x17,
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x28, 0x29, 0x2A, 0x2B, 0x2E,
+    0x31, 0x35, 0x39, 0x3D, 0x37, 0x3F,
+}
+
+
+def region_is_code(rom_bytes, off, end_off):
+    """Is this stretch plausibly instructions rather than data?
+
+    Widening a function has to stop at the end of the code. When it does not,
+    a data word gets decoded as an instruction and the damage shows up far
+    away: as `movn` in ovl_497140 (an instruction that appears nowhere in the
+    disassembly), or as a `jal` to 0x801E709C that no Splat file contains,
+    which makes N64Recomp invent a static function over yet more data.
+    """
+    import struct as _struct
+    span = rom_bytes[off:end_off]
+    words = [_struct.unpack(">I", span[i:i + 4])[0]
+             for i in range(0, len(span) - 3, 4)]
+    if not words:
+        return True
+    run = best = 0
+    for w in words:
+        run = run + 1 if w == 0 else 0
+        best = max(best, run)
+    if best >= 8:                       # padding or a zeroed table
+        return False
+    known = sum(1 for w in words if (w >> 26) in COMMON_OPS)
+    return known >= len(words) * 6 // 10
 
 
 def looks_like_code(rom_bytes, off, limit):
@@ -451,7 +489,8 @@ def main():
         funcs = split_at_targets(funcs, targets)
         funcs = synthesize_missing(funcs, targets, rom_bytes, rom, vram,
                                    desc_sizes.get(rom, hi - lo))
-        funcs = merge_across_branches(funcs, edges, targets, name)
+        funcs = merge_across_branches(funcs, edges, targets, name,
+                                      rom_bytes, rom, vram)
         total += len(funcs)
         split_total += len(funcs) - raw
         chunks += ["", "[[section]]", f'name = "{name}"',
