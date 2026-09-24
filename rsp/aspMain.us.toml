@@ -1,0 +1,31 @@
+# Knife Edge: Nose Gunner (USA) stock N64 audio microcode.
+#
+# Located from the game rather than by searching: the RSP adapter logged the
+# ucode pointer out of the first M_AUDTASK it saw, guest 0x800E52C0. The
+# resident segment maps ROM 0x1000 to VRAM 0x800C2400, so that is ROM 0x23EC0 --
+# inside the 0x23DF0-0x27200 block docs/ROM_ANALYSIS.md had already identified
+# as embedded microcode from its COP2 density.
+#
+# The 0xE20 bytes there are byte-identical to the stock aspMain in Cruis'n USA
+# and Cruis'n World, and the identical run is exactly 0xE20 long, which is both
+# the confirmation that this is the stock revision and the reason the text size
+# is not a guess.
+text_offset = 0x23EC0
+text_size = 0xE20
+# Where rspboot leaves the task's text in IMEM.
+text_address = 0x04001080
+rom_file_path = "../rom/Knife Edge - Nose Gunner (U) [!].z64"
+# "./" matters: RSPRecomp calls create_directories on the parent path, and a
+# bare filename has an empty parent, which throws.
+output_file_path = "./aspMain.cpp"
+output_function_name = "aspMain"
+
+# The command dispatcher jumps through a 16-entry table in DMEM, so the
+# recompiler cannot see these entry points statically. Without them roughly
+# half the audio commands exit with UnhandledJumpTarget at run time. Same
+# revision, so the same handler addresses as the Cruis'n configs, including the
+# 0x1E24 target specific to this 0xE20-byte build.
+extra_indirect_branch_targets = [
+    0x1118, 0x1470, 0x11DC, 0x1B38, 0x1214, 0x187C, 0x1254, 0x12D0,
+    0x12EC, 0x1328, 0x140C, 0x1294, 0x1E24, 0x138C, 0x170C, 0x144C,
+]

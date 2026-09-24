@@ -128,10 +128,12 @@ keeping, because the same shapes will recur:
   recognise. The flag now `_Exit`s after flushing, and the bundle opts out of
   persistent UI.
 
-Audio is **stubbed, not implemented**: `rsp/knife_edge_rsp.cpp` consumes
-`M_AUDTASK` and reports it done, which is why the app is silent. Returning
-`nullptr` is fatal, so this placeholder is what lets everything downstream of
-the first audio task run at all.
+**Audio works.** The stock `aspMain` at ROM `0x23EC0` is recompiled by
+RSPRecomp and routed from the adapter; a 1,800-VI (30 s) run produces 1.91M
+non-zero samples, 99.3% of a continuous 32 kHz stereo stream, with no unhandled
+jump targets. It was found from the running game -- the adapter logged the ucode
+pointer out of the first `M_AUDTASK` -- rather than by pattern-searching the
+ROM. See [`rsp/README.md`](rsp/README.md).
 
 The candidate map remains explicitly unreviewed -- no data symbols, no
 relocations. Everything above runs on it, which says the segmentation is
@@ -139,22 +141,17 @@ broadly right; it does not make the map correct.
 
 ## Next work, in order
 
-1. **Generate the audio microcode.** The adapter's own log named it: guest
-   `0x800E52C0`, which is ROM `0x23EC0`, inside the `0x23DF0`-`0x27200` block
-   `docs/ROM_ANALYSIS.md` already identified. Generate with RSPRecomp; the toml
-   needs `extra_indirect_branch_targets` for the 16-entry DMEM command table or
-   half the commands exit with `UnhandledJumpTarget`. Then drop the stub.
-2. **Look at a frame.** Nothing so far distinguishes "the game submits display
+1. **Look at a frame.** Nothing so far distinguishes "the game submits display
    lists" from "the display lists are right". Watch RT64's stderr for a GBI
    mismatch on the first real task.
-3. **Reach the gameplay overlay.** `func_800CC690` loads the 205 KB module at
+2. **Reach the gameplay overlay.** `func_800CC690` loads the 205 KB module at
    `0x8016D6F0`; expect the second overlay tier at `0x801D21F0` right after,
    six of which no resident call site references.
-4. **Bind the remaining input boundaries** -- `osContGetReadData`, Pak I/O --
+3. **Bind the remaining input boundaries** -- `osContGetReadData`, Pak I/O --
    and author `config/runtime-boundaries.json` so the audit is a build gate.
-5. **Recover a reviewed symbol map** into `input/knife-edge.syms.toml`. Still
+4. **Recover a reviewed symbol map** into `input/knife-edge.syms.toml`. Still
    the long pole, and still what separates a probe from a port.
-6. **Settle the save type** from a real access path. SRAM and FlashRAM are
+5. **Settle the save type** from a real access path. SRAM and FlashRAM are
    ruled out; confirm EEPROM or None. Until then `SAVE_TYPE` stays `None`.
 
 ## Standing rules for this workspace
