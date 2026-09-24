@@ -29,3 +29,7 @@
 /.knife-edge/
 .DS_Store
 *.temp
+
+# Go tool binaries (built by scripts/recover_map.sh)
+/tools/map-recovery/map-recovery
+/tools/recomp-boundary-audit/recomp-boundary-audit

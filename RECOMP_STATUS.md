@@ -48,11 +48,47 @@ crosses the cut.
 ROM `0x23DF0`–`0x27200` turned out to be RSP microcode embedded in the resident
 segment (895 COP2 words, zero MIPS prologues) and is now marked `bin`.
 
+## Phase 1-2: recovery tooling and the libultra boundary (2026-09-24)
+
+`tools/map-recovery` and `tools/recomp-boundary-audit` are ported from the
+Cruis'n workspace and build with Go 1.26. `scripts/recover_map.sh` runs
+`match` against all three reviewed Cruis'n maps, then `sweep` and `locate`.
+
+**`locate` reports 0 external jal targets**, so no overlay is hiding in unmapped
+ROM: the 17 account for every call in the image.
+
+The candidate generator now also splits on cross-overlay call targets — the
+gameplay module calls the level modules, and those targets appear in no file
+that maps the callee. That took the map from 1,264 to 2,314 functions and
+`sweep`'s unmapped count from 9 to **3** (one function-pointer constant and two
+calls into the level overlays past the disassembled extent).
+
+**34 libultra functions are named and bound**, filtered by
+`tools/name-filter/classify_names.py`, which reads N64Recomp's own
+`symbol_lists.cpp` and the runtime's actual `*_recomp` symbols. It rejected 13
+of the 47 proposals, and every rejection mattered:
+
+- `osPiReadIo` — in `reimplemented_funcs` with **no runtime implementation**;
+  adopting it is a guaranteed link error.
+- seven names in `ignored_funcs` (`__osProbeTLB`, `__osDispatchThread`,
+  `__osEnqueueAndYield`, `osPiRawStartDma`, `osPiWriteIo`, `osYieldThread`,
+  `__osViInit`) — adopting one **silently deletes** working code.
+- two ambiguous structural matches, and one misspelled variant
+  (`osWriteBackDCacheAll`) that N64Recomp would not recognize at all.
+
+Generated code now calls the runtime for real: `osRecvMesg_recomp` (47 sites),
+`osSendMesg_recomp` (33), `osCreateThread_recomp` (11), `osSpTaskLoad_recomp`,
+`osSpTaskStartGo_recomp`, `osViSwapBuffer_recomp`. The match also independently
+confirmed the hand identification of `func_800D1D10`'s callees as
+osCreateMesgQueue / osInvalDCache / osRecvMesg.
+
 ## Current gate
 
-**The candidate probe recompiles 1,263 of 1,264 functions.** The one holdout,
-`func_8017B3C8`, branches to `0x8017BA78` — past the end of its own overlay —
-so its boundary is still wrong.
+**The candidate probe recompiles 2,313 of 2,314 functions.** The one holdout is
+a function in `ovl_02FC30` whose `.L` branch crosses a protected call target —
+two routines sharing a tail. Splitting and merging genuinely disagree there, and
+the call target wins because a call must resolve to an exact address while a
+branch only has to land inside some function.
 
 That number is a diagnostic, not a milestone: the candidate map is explicitly
 unreviewed, with no data symbols and no relocations, so it cannot produce a

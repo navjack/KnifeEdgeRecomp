@@ -201,6 +201,16 @@ def main():
     # mid-function in another, and a global set splits both. Each section sees
     # its own calls plus the resident segment's, which is what can call into it.
     resident_targets = call_targets(asm / "1050.s")
+    # Overlays call into other overlays: the gameplay module at 0x8016D6F0 calls
+    # the level modules at 0x801D21F0. Those targets appear in no file that maps
+    # the callee, so a per-file target set leaves them without an entry point and
+    # `map-recovery sweep` reports them as unmapped. Split on every call target in
+    # the image that lands inside a section; only same-file targets are protected
+    # from merging, since a cross-overlay call is ambiguous between the overlays
+    # sharing that destination and N64Recomp resolves it at runtime anyway.
+    all_targets = set()
+    for src in sorted(asm.glob("*.s")):
+        all_targets |= call_targets(src)
 
     segs = [("entry", 0x1000, 0x800C2400), ("main", 0x1050, 0x800C2450)]
     segs += code_segments(root / "splat.yaml")
@@ -222,18 +232,23 @@ def main():
             return 2
         funcs, edges = parse_file(src)
         raw = len(funcs)
-        # A call from inside this overlay is unambiguously an entry point here,
-        # so it is protected from merging. A call from the resident segment may
-        # well mean the *other* overlay mapped at the same vram, so it is only a
-        # hint: split on it, but let a crossing branch merge it back. N64Recomp
-        # resolves such ambiguous targets at runtime anyway.
-        # Every call target is protected from being absorbed. Where a crossing
-        # branch and a call target genuinely conflict -- routines sharing a tail
-        # -- the call wins and the branch is left unresolved, because a call has
-        # to resolve to an exact address while a branch only needs to land
-        # inside some function. Those few functions are reported by N64Recomp as
-        # "Unhandled branch" and are a known limit of an unreviewed map.
-        targets = call_targets(src) | resident_targets
+        # Split on every call target that lands in this section, wherever it
+        # was found. Overlays call into other overlays -- the gameplay module at
+        # 0x8016D6F0 calls the level modules at 0x801D21F0 -- and those targets
+        # appear in no file that maps the callee, so a per-file set leaves them
+        # without an entry point and `map-recovery sweep` flags them.
+        #
+        # Every call target is also protected from merging. N64Recomp's
+        # resolve_jal needs the target to begin a function in some section that
+        # covers it; if a merge absorbs one, the call fails outright with "No
+        # function found for jal target". Where a crossing branch and a call
+        # target genuinely conflict -- routines sharing a tail -- the call wins,
+        # and the branch is left for N64Recomp to report as "Unhandled branch".
+        # That is a known limit of an unreviewed map, not something to paper over.
+        lo = vram
+        hi = max((v + sz for _, v, sz in funcs), default=vram)
+        targets = (call_targets(src) | resident_targets |
+                   {t for t in all_targets if lo <= t < hi})
         funcs = merge_across_branches(
             split_at_targets(funcs, targets), edges, targets)
         total += len(funcs)

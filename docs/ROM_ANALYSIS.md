@@ -76,12 +76,12 @@ ROM `0x27200` then begins the pointer table below.
 The `0x800E8600` table is one descriptor among many. Four loaders consume them,
 and between them they pin down the struct:
 
-| Loader | Reads | Does |
-| --- | --- | --- |
-| `func_800C3968` | `[0]`,`[1]`,`[2]` | DMA only, 3-word descriptor |
-| `func_800C3930` | `[0]`,`[2]`,`[3]` | DMA only |
-| `func_800C38C8` | `+0x00..0x1C` | writeback dcache, inval dcache, DMA — **data** |
-| `func_800C3848` | `+0x00..0x24` | the above plus **inval icache** — **code** |
+| Loader | Reads | Does | Descriptors actually handed to it |
+| --- | --- | --- | --- |
+| `func_800C3968` | `[0]`,`[1]`,`[2]` | DMA only, 3-word descriptor | — |
+| `func_800C3930` | `[0]`,`[2]`,`[3]` | DMA only | 22 references, **all data** |
+| `func_800C38C8` | `+0x00..0x1C` | writeback dcache, inval dcache, DMA | 21 references, **all code** |
+| `func_800C3848` | `+0x00..0x24` | the above plus inval icache | **none — dead code** |
 
 ```c
 struct OverlayDesc {      // 0x28 bytes
@@ -100,9 +100,18 @@ struct OverlayDesc {      // 0x28 bytes
 
 All of them DMA through `func_800D1D10(romStart, dest, size)`.
 
-The instruction-cache invalidate in `func_800C3848` is what proves these carry
-executable code; the descriptors themselves are classified individually in
-`tools/overlay-map/overlay_map.py` by MIPS prologue and `jr $ra` density.
+An earlier reading of this table took the instruction-cache invalidate in
+`func_800C3848` to be the code/data discriminator. **That was wrong.**
+`func_800C3848` is never referenced at all, while `func_800C38C8` — which does
+*not* invalidate the icache — receives all 21 code descriptors and
+`func_800C3930` all 22 data ones. The sound evidence is the per-descriptor
+classification in `tools/overlay-map/overlay_map.py`, by MIPS prologue and
+`jr $ra` density; the loader split independently confirms it with a perfect
+21/0 and 0/22 separation.
+
+(The 21-vs-17 gap is descriptors referenced from more than one call site, e.g.
+`D_800EB4A0` from both `func_800CBA00` and `func_800CC8D0`. Distinct code
+descriptors reachable from the resident segment: 11 — see below.)
 
 **36 descriptors, 17 of them code.** Every code descriptor is immediately
 followed by a data one at the contiguous destination — classic `{text, data}`
@@ -121,6 +130,24 @@ The resident segment at `0x800C2400` is therefore only the engine half. All six
 call targets that the first recompiler probe could not resolve
 (`0x801752D8`, `0x80178044`, `0x8017B678`, `0x8017BC34`, `0x80193B40`,
 `0x80196810`) fall inside the 205 KB module at `0x8016D6F0`.
+
+### Two tiers
+
+Of the 17 code overlays, only **11** are loaded from the resident segment, and
+all 11 agree exactly with `overlay_map.py`. The remaining six — ROM `0x1B66F0`,
+`0x255660`, `0x34B590`, `0x3EFDD0`, `0x497140`, `0x4DC6D0` — are referenced from
+no resident call site and *all* target `0x801D21F0`. They are loaded by the
+gameplay overlay itself, which makes `0x801D21F0` the level/stage swap point and
+the overlay system two-tier:
+
+```
+resident 0x800C2400
+  └─ gameplay overlay  0x8016D6F0   (ROM 0x1501A0, 205 KB)
+       └─ level modules 0x801D21F0  (6 of them, swapped per stage)
+```
+
+`map-recovery locate` reports **0 external jal targets**, so no further overlay
+is hiding in unmapped ROM — the 17 account for every call in the image.
 
 Run `tools/overlay-map/overlay_map.py <rom>` for the full table.
 
