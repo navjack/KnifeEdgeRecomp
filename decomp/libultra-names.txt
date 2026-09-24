@@ -1,0 +1,39 @@
+# Addresses to name as libultra functions, applied by
+# tools/candidate-map/make_candidate_map.py so they survive
+# regeneration. Produced by tools/name-filter/classify_names.py,
+# which keeps only names N64Recomp recognises AND the runtime
+# actually implements.
+0x800D3B40 osViSetMode
+0x800D3BB0 osViSetSpecialFeatures
+0x800D63E0 osInvalICache
+0x800D6460 osInvalDCache
+0x800D70A0 osVirtualToPhysical
+0x800D76A0 osCreateThread
+0x800D77F0 osStartThread
+0x800D7940 osSetThreadPri
+0x800D8900 osCartRomInit
+0x800D8B80 osCreateMesgQueue
+0x800D8D00 osRecvMesg
+0x800D8E60 osAiSetNextBuffer
+0x800D95F0 osSendMesg
+0x800D9740 osSetIntMask
+0x800D9DD0 osWritebackDCacheAll
+0x800D9E00 osViBlack
+0x800DA680 osViSetEvent
+0x800DA6F0 osSetEventMesg
+0x800DA780 osSpTaskYielded
+0x800DA91C osSpTaskLoad
+0x800DAAAC osSpTaskStartGo
+0x800DAB70 osViSwapBuffer
+0x800DABC0 osContInit
+0x800DB0E0 osContStartQuery
+0x800DB164 osContGetQuery
+0x800DB560 __osDisableInt
+0x800DC200 osWritebackDCache
+0x800DD800 osJamMesg
+0x800E0180 osEPiRawStartDma
+0x800E0B80 __osSpSetPc
+0x800E0C80 osGetTime
+0x800E0D10 osSetTimer
+0x800E1380 osPiGetStatus
+0x800E13B0 osDestroyThread

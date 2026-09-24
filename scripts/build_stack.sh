@@ -86,6 +86,11 @@ apply_patch N64Recomp N64Recomp-cop0-control-trap.patch \
     "cpu_INVALID" src/recompilation.cpp
 apply_patch N64Recomp N64Recomp-discard-bad-statics.patch \
     "discarding static function" src/main.cpp
+
+# Only the FR bit has a host-side effect after static recompilation; exiting
+# over any other status write kills the game during ordinary libultra startup.
+apply_patch N64ModernRuntime N64ModernRuntime-cop0-status-tolerance.patch \
+    "unhandled status register bits changed" librecomp/src/recomp.cpp
 # This one lands in recompilation.cpp too, which the cache-noop patch above has
 # already modified; apply_patch tracks that and checks it with git apply --check.
 apply_patch N64Recomp N64Recomp-zero-register-writes.patch \

@@ -370,6 +370,26 @@ def looks_like_code(rom_bytes, off, limit):
 # The file is produced by tools/candidate-map/converge.py, which reads the exact
 # extent each failure requires straight out of N64Recomp's own diagnostics
 # rather than guessing.
+def load_libultra_names(root):
+    """vram -> libultra name, for functions the runtime implements.
+
+    Applied during generation rather than by editing the finished map: the map
+    is rebuilt from Splat every run, so a post-hoc rename is silently lost and
+    the build goes back to recompiling the game's own libultra -- which then
+    touches hardware registers the runtime does not map.
+    """
+    path = root / "decomp/libultra-names.txt"
+    names = {}
+    if not path.exists():
+        return names
+    for line in path.read_text().splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            vram, name = line.split()
+            names[int(vram, 16)] = name
+    return names
+
+
 def load_size_overrides(root):
     path = root / "decomp/size-overrides.txt"
     overrides = {}
@@ -387,6 +407,7 @@ def load_size_overrides(root):
 
 
 SIZE_OVERRIDES = {}
+LIBULTRA_NAMES = {}
 
 
 def synthesize_missing(funcs, targets, rom_bytes, sec_rom, sec_vram, sec_size):
@@ -485,6 +506,7 @@ def main():
     desc_sizes = descriptor_sizes(root)
     rom_bytes = (root / "rom/Knife Edge - Nose Gunner (U) [!].z64").read_bytes()
     SIZE_OVERRIDES.update(load_size_overrides(root))
+    LIBULTRA_NAMES.update(load_libultra_names(root))
 
     chunks = [
         "# Candidate map generated from Splat control-flow boundaries by",
@@ -555,6 +577,9 @@ def main():
             # qualify every overlay function with its section. Resident names,
             # including the adopted libultra ones, are already unique.
             emitted = fname if name in ("entry", "main") else f"{name}_{fname}"
+            # A recognised libultra name makes N64Recomp drop the guest body and
+            # call the runtime's implementation instead.
+            emitted = LIBULTRA_NAMES.get(fvram, emitted)
             chunks.append(f'    {{ name = "{emitted}", vram = 0x{fvram:X}, size = 0x{fsize:X} }},')
         chunks.append("]")
         # NOTE: deliberately no `relocs` array here.

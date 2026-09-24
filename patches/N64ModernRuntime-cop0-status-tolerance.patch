@@ -1,0 +1,29 @@
+diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -442,11 +442,21 @@
+         changed &= ~(uint32_t)StatusReg::FR;
+     }
+ 
+-    // If any other bits were changed, assert false as they're not handled currently
++    // Keep other guest-visible status bits instead of exiting over them. Only FR
++    // has a host-side effect after static recompilation; the rest describe
++    // hardware this runtime does not emulate. Knife Edge's boot path sets CU1
++    // (0x20000000) to enable the FPU on its very first status write, which is
++    // ordinary libultra startup, and exiting there kills the process before the
++    // game runs a single instruction of its own.
++    //
++    // Still report each new bit pattern once, so a status write that really does
++    // matter is not silently swallowed.
+     if (changed) {
+-        printf("Unhandled status register bits changed: 0x%08X\n", changed);
+-        assert(false);
+-        exit(EXIT_FAILURE);
++        static uint32_t reported = 0;
++        if ((changed & ~reported) != 0) {
++            reported |= changed;
++            fprintf(stderr, "Note: unhandled status register bits changed: 0x%08X\n", changed);
++        }
+     }
+     
+     // Update the status register in the context

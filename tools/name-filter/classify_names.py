@@ -95,15 +95,25 @@ def main():
     print(" ".join(adopt))
 
     if apply_to is not None:
-        text = apply_to.read_text()
-        applied = 0
-        for _, old, new, _ in sorted(set(adopt_rows)):
-            needle = f'name = "{old}"'
-            if needle in text:
-                text = text.replace(needle, f'name = "{new}"')
-                applied += 1
-        apply_to.write_text(text)
-        print(f"\napplied {applied} rename(s) to {apply_to}")
+        # Write the adoptions to a file the map generator reads, NOT to the map
+        # itself. The map is regenerated from Splat on every run -- converge.py
+        # alone regenerates it a hundred times -- so an edit applied to the
+        # generated file is silently undone, and the build quietly goes back to
+        # recompiling the game's own libultra. That is exactly what happened:
+        # the guest's osPiGetStatus ran instead of the runtime's and faulted
+        # reading SI_STATUS at 0xA4800018, which is MMIO the runtime does not map.
+        out = ROOT / "decomp/libultra-names.txt"
+        lines = [
+            "# Addresses to name as libultra functions, applied by",
+            "# tools/candidate-map/make_candidate_map.py so they survive",
+            "# regeneration. Produced by tools/name-filter/classify_names.py,",
+            "# which keeps only names N64Recomp recognises AND the runtime",
+            "# actually implements.",
+        ]
+        for addr, _old, new, _why in sorted(set(adopt_rows)):
+            lines.append(f"0x{addr.upper()} {new}")
+        out.write_text("\n".join(lines) + "\n")
+        print(f"\nwrote {len(set((r[0], r[2]) for r in adopt_rows))} name(s) to {out}")
     return 0
 
 
