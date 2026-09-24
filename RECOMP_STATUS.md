@@ -82,37 +82,80 @@ Generated code now calls the runtime for real: `osRecvMesg_recomp` (47 sites),
 confirmed the hand identification of `func_800D1D10`'s callees as
 osCreateMesgQueue / osInvalDCache / osRecvMesg.
 
-## Current gate
+## Current gate (2026-09-24, evening)
 
-**The candidate probe recompiles 2,313 of 2,314 functions.** The one holdout is
-a function in `ovl_02FC30` whose `.L` branch crosses a protected call target —
-two routines sharing a tail. Splitting and merging genuinely disagree there, and
-the call target wins because a call must resolve to an exact address while a
-branch only has to land inside some function.
+**The game boots, loads overlays at runtime, and holds a per-frame loop.** A
+600-frame bounded run exits cleanly, having loaded two overlays, executed
+overlay code, submitted display lists through `osSpTaskStartGo`, and queued an
+audio buffer on every frame. What has *not* been established is whether what
+reaches RT64 is a correct frame; nobody has looked at the window.
 
-That number is a diagnostic, not a milestone: the candidate map is explicitly
-unreviewed, with no data symbols and no relocations, so it cannot produce a
-working game. It exists to show where the segmentation is still wrong, and it
-has now done most of that job.
+Getting here was four boundary problems, and the shape of each is worth
+keeping, because the same shapes will recur:
+
+- **The libultra boundary is not just the functions that touch hardware.**
+  Listing every function in the resident segment that reads an MMIO register
+  and walking each one up its call graph bound seven entry points and took
+  eight hardware leaves off the live path at once. But it missed
+  `osEPiStartDma`, which touches no register: it posts to the PI device
+  manager and blocks. Binding `osCreatePiManager` had already replaced that
+  manager with the runtime's empty one, so every DMA waited forever. Binding a
+  function that creates a service thread obliges you to bind every client that
+  posts to it.
+
+- **A name matched structurally is a hypothesis, not a fact.** `map-recovery
+  match` hashes instructions with the operands masked, so it cannot separate
+  two routines that differ only in an immediate: it called `__osSiDeviceBusy`
+  `osPiGetStatus`, because SI_STATUS and PI_STATUS differ only in a `lui`.
+  Every MMIO accessor needs a person to read the register address before its
+  name is trusted. Hand corrections live in `config/name-corrections.txt`.
+
+- **Guest busy-waits deadlock this runtime.** ultramodern drains its external
+  message queue only at the *start* of an os* call, and schedules guest threads
+  one at a time until one calls into the OS. A loop that calls nothing does
+  both fatal things at once. `tools/spin-scan/find_spin_loops.py` finds them by
+  shape and emits the hook entries;
+  [`native/game/guest_waits.cpp`](native/game/guest_waits.cpp) supplies the
+  poll. Note that delivering the message is only half of it -- the woken thread
+  does not run until the spinning one yields, which is why every os* entry
+  point ends in `check_running_queue`.
+
+- **Bounded runs must not unwind.** `recomp::start` joins the game and event
+  threads but never the guest OSThreads, so it unmapped RDRAM underneath them
+  and every `--stop-after-vi` run ended in a SIGSEGV unrelated to the game.
+  Enough of those got macOS prompting to reopen windows on launch, which blocks
+  in `SDL_CreateWindow` before anything renders and cost a good while to
+  recognise. The flag now `_Exit`s after flushing, and the bundle opts out of
+  persistent UI.
+
+Audio is **stubbed, not implemented**: `rsp/knife_edge_rsp.cpp` consumes
+`M_AUDTASK` and reports it done, which is why the app is silent. Returning
+`nullptr` is fatal, so this placeholder is what lets everything downstream of
+the first audio task run at all.
+
+The candidate map remains explicitly unreviewed -- no data symbols, no
+relocations. Everything above runs on it, which says the segmentation is
+broadly right; it does not make the map correct.
 
 ## Next work, in order
 
-1. **Recover a reviewed symbol map** into `input/knife-edge.syms.toml`. This is
-   the long pole. See `input/README.md` for the route Cruis'n USA took,
-   including the live-capture step that is what actually turns a candidate into
-   a reviewed map. The section layout is no longer the unknown; function
-   boundaries, data symbols and relocations are.
-2. **Write the `rsp/` adapter.** RT64 handles F3DEX2 itself, so the first
-   version only has to route graphics tasks and refuse the rest loudly.
-3. **Locate the audio microcode** inside the `0x23DF0`–`0x27200` block by
-   matching the canonical `aspMain` prologue, then wire `M_AUDTASK` through the
-   adapter.
-4. **Bind the libultra boundaries** — `osContStartReadData`, `osContGetReadData`,
-   EEPROM/Pak I/O — to their runtime replacements. Cruis'n USA needed about a
-   dozen, and getting them wrong is what kept it off its title screen.
-5. **Settle the save type** from a real access path. SRAM and FlashRAM are ruled
-   out; confirm EEPROM or None. Until then `SAVE_TYPE` stays `None`.
-6. Build, package, and only then hand a bundle to a person for playtesting.
+1. **Generate the audio microcode.** The adapter's own log named it: guest
+   `0x800E52C0`, which is ROM `0x23EC0`, inside the `0x23DF0`-`0x27200` block
+   `docs/ROM_ANALYSIS.md` already identified. Generate with RSPRecomp; the toml
+   needs `extra_indirect_branch_targets` for the 16-entry DMEM command table or
+   half the commands exit with `UnhandledJumpTarget`. Then drop the stub.
+2. **Look at a frame.** Nothing so far distinguishes "the game submits display
+   lists" from "the display lists are right". Watch RT64's stderr for a GBI
+   mismatch on the first real task.
+3. **Reach the gameplay overlay.** `func_800CC690` loads the 205 KB module at
+   `0x8016D6F0`; expect the second overlay tier at `0x801D21F0` right after,
+   six of which no resident call site references.
+4. **Bind the remaining input boundaries** -- `osContGetReadData`, Pak I/O --
+   and author `config/runtime-boundaries.json` so the audit is a build gate.
+5. **Recover a reviewed symbol map** into `input/knife-edge.syms.toml`. Still
+   the long pole, and still what separates a probe from a port.
+6. **Settle the save type** from a real access path. SRAM and FlashRAM are
+   ruled out; confirm EEPROM or None. Until then `SAVE_TYPE` stays `None`.
 
 ## Standing rules for this workspace
 
