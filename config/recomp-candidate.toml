@@ -262,3 +262,242 @@ text = "knife_edge_pipeline_frame(rdram, ctx);"
 func = "func_800D2930"
 before_vram = 0x800D29F4
 text = "knife_edge_pipeline_returned(rdram, ctx);"
+
+# Title and attract waits, one per overlay. Each spins on the next-state id
+# D_8011D1B4 and the controller word D_8010BAD0, and reaches no os* call --
+# ovl_041650's calls only rand() -- so the runtime never drains its external
+# queue and never reschedules, and the thread that would set either global
+# can never run. Found by tools/spin-scan/find_spin_loops.py --hooks.
+[[patches.hook]]
+# waits on D_80109418
+func = "func_800C8604"
+before_vram = 0x800C8B34
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_80109414
+func = "func_800CB8C8"
+before_vram = 0x800CB91C
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_80128A60
+func = "func_800CD6B0"
+before_vram = 0x800CD7BC
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_800EE110 jtbl_800EE130
+func = "func_800DB900"
+before_vram = 0x800DBB4C
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_800EE110 jtbl_800EE130
+func = "func_800DB900"
+before_vram = 0x800DBB58
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_800EE110 jtbl_800EE130
+func = "func_800DB900"
+before_vram = 0x800DBB78
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_800EE16C
+func = "func_800DD100"
+before_vram = 0x800DD228
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8016A721
+func = "func_800E3350"
+before_vram = 0x800E3678
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8016A721
+func = "func_800E3350"
+before_vram = 0x800E3710
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_111CC0_func_8017E07C"
+before_vram = 0x8017E110
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_1199D0_func_8017B0C0"
+before_vram = 0x8017B6E8
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1B4
+func = "ovl_12C2F0_func_8017B0C0"
+before_vram = 0x8017B144
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_12C2F0_func_8017B0C0"
+before_vram = 0x8017B158
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_12C2F0_func_8017B0C0"
+before_vram = 0x8017B170
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_12C2F0_func_8017BAE8"
+before_vram = 0x8017BF24
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1C4
+func = "ovl_1501A0_func_8016EED8"
+before_vram = 0x8016F0CC
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1C4
+func = "ovl_1501A0_func_801756B0"
+before_vram = 0x80175710
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8019F118
+func = "ovl_1501A0_func_80176860"
+before_vram = 0x80176900
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D474
+func = "ovl_1501A0_func_80180A5C"
+before_vram = 0x80180AAC
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1C4 D_801239B0
+func = "ovl_1501A0_func_80183ADC"
+before_vram = 0x80183BE8
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1C4
+func = "ovl_1501A0_func_80193B40"
+before_vram = 0x80193D6C
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1C4
+func = "ovl_1501A0_func_80193E94"
+before_vram = 0x80194398
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1C4
+func = "ovl_1501A0_func_80193E94"
+before_vram = 0x801944C4
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1C4
+func = "ovl_1501A0_func_80193E94"
+before_vram = 0x801945C8
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1C4
+func = "ovl_1501A0_func_80193E94"
+before_vram = 0x801946F8
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8019F118
+func = "ovl_1501A0_func_801961DC"
+before_vram = 0x801962D4
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8019F118
+func = "ovl_1501A0_func_801961DC"
+before_vram = 0x8019643C
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1C4 D_801239A8 D_8019F108
+func = "ovl_1501A0_func_801961DC"
+before_vram = 0x801964C8
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_03D600_func_8017B0C0"
+before_vram = 0x8017B150
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1B4
+func = "ovl_041650_func_8017B0C0"
+before_vram = 0x8017B130
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_041650_func_8017B0C0"
+before_vram = 0x8017B144
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_041650_func_8017B0C0"
+before_vram = 0x8017B15C
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_4D5FC0_func_801DC320"
+before_vram = 0x801DC3B4
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8011D1B4
+func = "ovl_0BA450_func_801DC320"
+before_vram = 0x801DC390
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_0BA450_func_801DC320"
+before_vram = 0x801DC3A4
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_0BA450_func_801DC320"
+before_vram = 0x801DC3BC
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_0BA450_func_801E02C0"
+before_vram = 0x801E0354
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_0EF7C0_func_8017C95C"
+before_vram = 0x8017DA8C
+text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# waits on D_8010BAD0 D_8011D1B4
+func = "ovl_0F4810_func_8017B778"
+before_vram = 0x8017BB48
+text = "knife_edge_guest_poll(rdram, ctx);"
