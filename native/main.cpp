@@ -675,6 +675,20 @@ int main(int argc, char** argv) {
 
     recomp::start(config);
 
+    // Leave here rather than unwinding, for the same reason the bounded run
+    // and the double-Cmd-Q path do: recomp::start never joins the guest
+    // OSThreads it spawned, so they are still running when this function
+    // starts freeing the audio device, tearing down the window and running
+    // static destructors, and eventually when RDRAM is unmapped underneath
+    // them. That race is what both of the crashes seen so far fell out of --
+    // a SIGBUS in func_800D2930 reading guest address 1, and a heap-corruption
+    // SIGTRAP raised after RmlUi had already reported its shutdown leaks. The
+    // process is exiting and the kernel reclaims all of it anyway; the only
+    // thing worth doing first is flushing what we have written.
+    knife_edge_pipeline_totals();
+    std::fflush(nullptr);
+    std::_Exit(EXIT_SUCCESS);
+
     {
         std::lock_guard lock{audio_mutex};
         if (audio_stream != nullptr) {
