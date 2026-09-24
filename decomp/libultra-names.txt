@@ -14,6 +14,7 @@
 0x800D77F0 osStartThread
 0x800D7940 osSetThreadPri
 0x800D8900 osCartRomInit
+0x800D8A00 osEPiStartDma
 0x800D8B80 osCreateMesgQueue
 0x800D8BB0 osAiSetFrequency
 0x800D8D00 osRecvMesg

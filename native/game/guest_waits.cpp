@@ -68,3 +68,21 @@ extern "C" void func_800D2B40(uint8_t* rdram, recomp_context* ctx) {
         }
     }
 }
+
+// Hooked into the body of a loop that waits on a flag without calling
+// anything. tools/spin-scan/find_spin_loops.py lists them: a short backward
+// branch whose body has no call, no store, and a load through a fixed global.
+//
+// The game uses one idiom throughout -- register a per-frame callback, then
+// spin until it sets D_8011D1B4 -- and repeats it verbatim in every overlay.
+// Nothing in such a loop reaches the runtime, so on its own it waits forever
+// for a callback whose retrace message is still sitting in the external queue.
+//
+// One iteration's worth of work: deliver whatever is pending, then let the
+// thread that was woken actually run. Both are what an os* call would have
+// done, which is the whole reason the loop works on hardware and not here.
+extern "C" void knife_edge_guest_poll(uint8_t* rdram, recomp_context* ctx) {
+    (void)ctx;
+    ultramodern::wait_for_external_message_timed(rdram, poll_interval_ms);
+    ultramodern::check_running_queue(rdram);
+}

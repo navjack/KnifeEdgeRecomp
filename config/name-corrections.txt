@@ -70,3 +70,20 @@ bind 0x800DA760 osSpTaskYield
 # osContStartReadData: __osSiGetAccess, build the read command, raw SI DMA out,
 # wait, raw SI DMA back, __osSiRelAccess.
 bind 0x800DAF00 osContStartReadData
+
+# osEPiStartDma(handle, mb, direction), the sole client of the PI device
+# manager: it fills in the OSIoMesg and osJamMesgs it to the manager's command
+# queue, then the caller blocks on the queue named in the message.
+#
+# This one is only broken *because* osCreatePiManager is bound above. The
+# runtime's osCreatePiManager is an empty function -- ultramodern services PI
+# DMA synchronously and has no manager thread -- so with the guest's own
+# osEPiStartDma still recompiled, every DMA was posted to a queue nobody was
+# reading and the caller waited forever. The game got exactly one frame in and
+# then stopped inside func_800D1D10, its blocking DMA helper.
+#
+# Worth stating as a rule, because the MMIO scan above cannot see it: binding a
+# function that creates a service thread obliges you to bind every client that
+# posts to that thread. osEPiStartDma touches no hardware register itself, so
+# nothing about its body says it depends on something that no longer exists.
+bind 0x800D8A00 osEPiStartDma

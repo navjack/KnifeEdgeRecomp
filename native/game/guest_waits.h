@@ -15,6 +15,10 @@ extern "C" {
  * lands here instead. See native/game/guest_waits.cpp. */
 void func_800D2B40(uint8_t* rdram, recomp_context* ctx);
 
+/* [[patches.hook]] target for the game's other wait loops, which spin on a
+ * flag without calling anything. Listed by tools/spin-scan. */
+void knife_edge_guest_poll(uint8_t* rdram, recomp_context* ctx);
+
 #ifdef __cplusplus
 }
 #endif

@@ -23,6 +23,22 @@ namespace {
 
 // One line per distinct task, not per submission: the audio task recurs every
 // frame and would otherwise bury everything else.
+// Stands in for the audio microcode. Reports the task finished without doing
+// any of its work, so the frame the game is waiting on can proceed.
+RspExitReason audio_not_implemented(uint8_t* rdram, uint32_t ucode_addr) {
+    (void)rdram;
+    (void)ucode_addr;
+    static bool warned = false;
+    if (!warned) {
+        warned = true;
+        std::fprintf(stderr,
+                     "[rsp] audio microcode not recovered; audio tasks are "
+                     "being dropped and the game will be silent. "
+                     "See rsp/README.md.\n");
+    }
+    return RspExitReason::Broke;
+}
+
 bool first_sighting(uint32_t type, uint32_t ucode) {
     static std::set<std::pair<uint32_t, uint32_t>> seen;
     return seen.emplace(type, ucode).second;
@@ -45,6 +61,16 @@ extern "C" RspUcodeFunc* knife_edge_get_rsp_microcode(const OSTask* task) {
 
     switch (type) {
         case M_AUDTASK:
+            // Audio is not implemented. Returning nullptr is fatal --
+            // task_thread_func quick-exits on it -- so until the microcode is
+            // recovered the task is consumed and reported done, which costs
+            // silence and lets everything downstream of it run. The game does
+            // not read the output buffer back, so nothing else observes this.
+            //
+            // This is a placeholder, not an implementation: it is why the app
+            // is silent, and it must go as soon as the real ucode exists.
+            return audio_not_implemented;
+#if 0
             // TODO: the audio microcode lives in the block at ROM
             // 0x23DF0-0x27200 (895 COP2 words, no MIPS prologues). Find the
             // stock aspMain prologue in it, generate with RSPRecomp, and return
@@ -55,6 +81,7 @@ extern "C" RspUcodeFunc* knife_edge_get_rsp_microcode(const OSTask* task) {
                          "[rsp] no audio microcode recovered yet; the process "
                          "will exit. See rsp/README.md.\n");
             return nullptr;
+#endif
 
         default:
             return nullptr;
