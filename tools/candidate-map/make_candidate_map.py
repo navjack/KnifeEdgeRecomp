@@ -188,6 +188,24 @@ def merge_across_branches(funcs, edges, protected):
     return out
 
 
+def descriptor_sizes(root):
+    """ROM start -> loaded size, for each code overlay, from the ROM's own table.
+
+    Splat only disassembles the part of a module it recognises as code, so a
+    section sized from the function extent understates the module -- by 75% for
+    ovl_3EFDD0. The descriptor is authoritative about how many bytes are loaded,
+    and N64Recomp uses the section size to decide what a section contains.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "overlay_map", root / "tools/overlay-map/overlay_map.py")
+    om = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(om)
+    rom = (root / "rom/Knife Edge - Nose Gunner (U) [!].z64").read_bytes()
+    return {d[3]: d[4] - d[3] for d in om.scan(rom)
+            if om.classify(rom, d[3], d[4])[0] == "code"}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".", type=pathlib.Path)
@@ -214,6 +232,7 @@ def main():
 
     segs = [("entry", 0x1000, 0x800C2400), ("main", 0x1050, 0x800C2450)]
     segs += code_segments(root / "splat.yaml")
+    desc_sizes = descriptor_sizes(root)
 
     chunks = [
         "# Candidate map generated from Splat control-flow boundaries by",
@@ -256,11 +275,36 @@ def main():
         chunks += ["", "[[section]]", f'name = "{name}"',
                    f"rom = 0x{rom:X}", f"vram = 0x{vram:X}"]
         end = max((v + s for _, v, s in funcs), default=vram)
-        chunks.append(f"size = 0x{end - vram:X}")
+        size = max(end - vram, desc_sizes.get(rom, 0))
+        chunks.append(f"size = 0x{size:X}")
         chunks.append("functions = [")
         for fname, fvram, fsize in sorted(funcs, key=lambda f: f[1]):
-            chunks.append(f'    {{ name = "{fname}", vram = 0x{fvram:X}, size = 0x{fsize:X} }},')
+            # Overlays that share a destination produce the same func_XXXXXXXX
+            # name in several sections, and the C generator emits one definition
+            # per function -- duplicates are a link error, which N64Recomp itself
+            # never reports. Splat's names are addresses, not identities, so
+            # qualify every overlay function with its section. Resident names,
+            # including the adopted libultra ones, are already unique.
+            emitted = fname if name in ("entry", "main") else f"{name}_{fname}"
+            chunks.append(f'    {{ name = "{emitted}", vram = 0x{fvram:X}, size = 0x{fsize:X} }},')
         chunks.append("]")
+        # NOTE: deliberately no `relocs` array here.
+        #
+        # `relocatable_sections_path` is inert in symbol-map mode --
+        # Context::from_symbol_file marks a section relocatable only when a
+        # `relocs` array is present (upstream/N64Recomp/src/config.cpp:649) --
+        # but marking these relocatable is WRONG without real reloc data.
+        # resolve_jal (src/recompilation.cpp:63) only accepts a candidate whose
+        # section is NOT relocatable, so every resident -> overlay call would
+        # resolve to nothing and fail outright.
+        #
+        # Left non-relocatable, N64Recomp does the right thing on its own: a
+        # target that several overlays claim resolves Ambiguous and is emitted
+        # as a runtime LOOKUP_FUNC, and a target only one overlay claims is a
+        # direct call, which is correct because only that overlay can be loaded
+        # there. The residual risk is a target whose true owner is missing a
+        # boundary in the map -- which is what `map-recovery sweep` exists to
+        # find, and why its count is a build-time gate.
 
     args.out.write_text("\n".join(chunks) + "\n")
     print(f"{len(segs)} sections, {total} functions "
