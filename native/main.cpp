@@ -26,6 +26,7 @@
 #include "nfd.h"
 #include "recomp.h"
 #include "recompinput/input_events.h"
+#include "recompinput/input_mapping.h"
 #include "recompinput/input_state.h"
 #include "recompinput/players.h"
 #include "recompinput/profiles.h"
@@ -440,11 +441,23 @@ bool parse_runtime_options(int argc, char** argv) {
 }
 
 void set_default_bindings() {
-    // Hook point for title-specific defaults. Knife Edge is a rail shooter and
-    // has no binding that the recomp defaults get obviously wrong, so nothing
-    // is overridden yet. Cruis'n needed this to move the accelerator (N64 Z)
-    // onto the right trigger; do the equivalent here once the real control
-    // scheme is confirmed in game.
+    // The stock recomp defaults are complete and playable, so this changes one
+    // thing only: N64 Z fires the gun in a nose-gunner game, and the stock
+    // mapping puts Z on the left trigger because that is where Z physically
+    // sits on an N64 pad. Faithful to the hardware, wrong for the hands -- on
+    // any modern pad the trigger you expect to shoot with is the right one.
+    //
+    // Binding Z to both triggers rather than moving it: nothing is taken away,
+    // whichever the player reaches for works, and a left-handed or
+    // single-trigger setup is not broken to fix an ergonomic default. R stays
+    // on the right trigger as well, which is harmless -- the game does not use
+    // R, and anyone who finds otherwise can rebind from Setup Controls.
+    recompinput::set_default_mapping_for_controller(
+        recompinput::GameInput::Z,
+        {
+            recompinput::InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, true),
+            recompinput::InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true),
+        });
 }
 
 void init_config() {
@@ -492,10 +505,11 @@ extern "C" uint64_t knife_edge_vi_count() {
     return vi_count.load(std::memory_order_relaxed);
 }
 
-// A knife_edge_guest_poll() hook belongs here if the game turns out to spin-wait
-// on hardware state. It needs ultramodern::poll_external_messages() and
-// yield_running_thread(), which are added by a N64ModernRuntime patch this
-// project has not adopted; see patches/README.md before writing it.
+// The game does spin-wait, in several places. knife_edge_guest_poll() lives in
+// native/game/guest_waits.cpp and is attached by the hooks
+// tools/spin-scan/find_spin_loops.py generates; no runtime patch was needed,
+// because ultramodern already exports wait_for_external_message_timed and
+// check_running_queue.
 
 extern "C" void knife_edge_trace_entry(const char* function_name) {
     if (function_trace_file.is_open()) {
