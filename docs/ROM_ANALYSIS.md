@@ -49,16 +49,27 @@ So:
 | Region | ROM | VRAM | Size |
 | --- | --- | --- | --- |
 | entry stub | `0x1000`–`0x1038` | `0x800C2400`–`0x800C2438` | `0x38` (padded to `0x1050`) |
-| text | `0x1050`–`0x271F8` | `0x800C2450`–`0x800E85F8` | `0x261A8` |
+| text | `0x1050`–`0x26FF0` | `0x800C2450`–`0x800E83F0` | `0x25FA0` |
+| embedded data blob | `0x26FF0`–`0x27200` | `0x800E83F0`–`0x800E8600` | `0x210` |
 | data / rodata | `0x27200`–`0x2DB50` | `0x800E8600`–`0x800EEF50` | `0x6950` |
 | bss (cleared by the stub) | — | `0x800EEF50`–`0x8016ABF0` | `0x7BCA0` |
 | bulk game data | `0x2DB50`–`0x800000` | loaded on demand | `0x7D24B0` |
 | initial stack pointer | — | `0x80126A60` | — |
 | real boot function | — | `0x800CD6B0` | — |
 
-The text/data boundary is exact: the last `jr ra` in the segment is at ROM
-`0x27170`, followed by two zero words of padding, and ROM `0x27200` begins a
-pointer table.
+Splat independently confirms every one of these: it resolves the stub's
+operands to `D_800EEF50`, `0x7BCA0`, `func_800CD6B0` and `D_80126A60` without
+being told any of them.
+
+The last real function is `func_800E83CC`, ending at ROM `0x26FEC`. The
+`0x26FF0`–`0x27200` window is **not** text: Splat classifies it as a data blob
+(`D_800E83F0`) and the instructions immediately before it are flagged
+handwritten (`mtc0 $s3, $3`). Its contents decode as IMEM-relative jumps, so it
+is most likely a handwritten RSP routine embedded in the code segment. Treat it
+as data until proven otherwise; a candidate map that takes it for text will
+generate junk.
+
+ROM `0x27200` then begins the pointer table below.
 
 ## Resource table at `0x800E8600`
 
@@ -114,6 +125,23 @@ gate — it is not guessed.
 2. What is the full meaning of the `0x800E8600` table — how many entries, and
    does any entry carry code rather than data?
 3. Which save device does the game use?
-4. Does anything in `0x27178`–`0x271F8` belong to a handwritten RSP routine
-   rather than CPU text? The instruction mix there looks like IMEM-relative
-   jumps, so candidate-map review should expect junk functions in that window.
+4. What exactly is the `0x26FF0`–`0x27200` blob (`D_800E83F0`)? It looks like a
+   handwritten RSP routine. If it is, it needs an entry in `rsp/` rather than
+   a place in the CPU symbol map.
+
+## Splat results, first split (2026-09-24)
+
+`scripts/split_rom.sh` with the committed `splat.yaml`:
+
+| Category | Size | Share |
+| --- | --- | --- |
+| `asm` (main text) | 156 KB | 1.86% |
+| `bin` (IPL3) | 4 KB | 0.05% |
+| `hasm` (entry stub) | 80 B | 0.00% |
+| `header` | 64 B | 0.00% |
+| unknown (bulk game data past `0x2DB50`) | 8 MB | 97.77% |
+
+**566 functions** in the main segment, plus 23 embedded data blobs and 10
+`dlabel` blocks. That the code is under 2% of the cartridge is expected for a
+rail shooter: nearly all of the 8 MB is streamed art, audio and level data
+reached through the `0x800E8600` table.

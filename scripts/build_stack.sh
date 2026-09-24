@@ -13,7 +13,7 @@ fi
 
 verify_checkout() {
     name=$1
-    expected=$(lock_value "$name.commit")
+    expected=$(require_lock_value "$name.commit")
     checkout="$ROOT/upstream/$name"
     if [ ! -d "$checkout/.git" ]; then
         echo "Missing locked checkout: $checkout"
@@ -27,7 +27,7 @@ verify_checkout() {
 }
 
 verify_patch() {
-    expected=$(lock_value "patches/$1.sha256")
+    expected=$(require_lock_value "patches/$1.sha256")
     actual=$(shasum -a 256 "$ROOT/patches/$1" | awk '{ print $1 }')
     if [ "$actual" != "$expected" ]; then
         echo "Patch fingerprint mismatch: patches/$1"

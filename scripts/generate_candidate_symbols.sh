@@ -43,15 +43,31 @@ done
         echo "vram = $vram"
         echo "size = $size"
         echo "functions = ["
-        # A function's address is the VRAM field of its first instruction
-        # comment, /* ROM VRAM WORD */. The game's own main is renamed so it
-        # cannot collide with the host program's main.
+        # Splat writes three shapes here. A function is
+        #   nonmatching <name>, <size>  /  glabel <name>  /  instructions
+        # while an embedded data blob is
+        #   nonmatching <name>          /  dlabel <name>  /  .word ...
+        # with no size field. Only the first is a function, so require both the
+        # size field and the glabel; taking every "nonmatching" line pulls data
+        # blobs into the map with an empty size.
+        #
+        # The address is the VRAM field of the first instruction comment,
+        # /* ROM VRAM WORD */. The game's own main is renamed so it cannot
+        # collide with the host program's main.
         awk '
             /^nonmatching / {
+                pending = 0
+                want_glabel = 0
+                if (NF != 3) { next }
                 name = $2
                 sub(/,$/, "", name)
                 size = $3
-                pending = 1
+                want_glabel = 1
+                next
+            }
+            want_glabel && NF > 0 {
+                want_glabel = 0
+                if ($1 == "glabel") { pending = 1 }
                 next
             }
             pending && $1 == "/*" {

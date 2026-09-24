@@ -33,7 +33,7 @@ checkout_pinned() {
 }
 
 for name in N64Recomp N64ModernRuntime rt64 hlslpp libultraship RecompFrontend; do
-    checkout_pinned "$name" "$(lock_value "$name.url")" "$(lock_value "$name.commit")"
+    checkout_pinned "$name" "$(require_lock_value "$name.url")" "$(require_lock_value "$name.commit")"
 done
 
 echo "All pinned upstream checkouts are ready"
