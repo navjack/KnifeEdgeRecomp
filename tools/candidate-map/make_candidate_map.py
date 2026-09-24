@@ -257,6 +257,26 @@ def merge_across_branches(funcs, edges, protected, section_name):
 
 JR_RA = 0x03E00008
 
+
+def looks_like_code(rom_bytes, off, limit):
+    """Do the bytes at this offset plausibly begin a function?
+
+    Overlays share destinations, so a call from one overlay names an address
+    that is data in most of the others. Creating a function there -- whether by
+    splitting an existing one or by inventing a new one -- hands N64Recomp data
+    to decode, which surfaces as nonsense like "Unhandled instruction: movn",
+    an instruction that appears nowhere in the whole disassembly.
+    """
+    import struct as _struct
+    window = rom_bytes[off:min(off + 0x400, limit)]
+    words = [_struct.unpack(">I", window[i:i + 4])[0]
+             for i in range(0, len(window) - 3, 4)]
+    if not words:
+        return False
+    if (words[0] & 0xFFFF8000) == 0x27BD8000:      # stack-adjust prologue
+        return True
+    return any((w & 0xFFFF8000) == 0x27BD8000 or w == JR_RA for w in words)
+
 # Addresses this generator cannot produce a valid function for, with the reason.
 # Each one is a real routine, not a boundary mistake -- the shapes simply have no
 # expression as a standalone recompiled function. Dropping the entry leaves the
@@ -319,15 +339,7 @@ def synthesize_missing(funcs, targets, rom_bytes, sec_rom, sec_vram, sec_size):
         # produces a function over data, which N64Recomp then chokes on with
         # things like "Unhandled instruction: movn" -- an instruction that
         # appears nowhere in the whole disassembly.
-        window = rom_bytes[off:min(off + 0x400, limit)]
-        words = [struct.unpack(">I", window[i:i + 4])[0]
-                 for i in range(0, len(window) - 3, 4)]
-        if not words:
-            continue
-        starts_with_prologue = (words[0] & 0xFFFF8000) == 0x27BD8000
-        has_code = any((w & 0xFFFF8000) == 0x27BD8000 for w in words) or \
-                   any(w == JR_RA for w in words)
-        if not (starts_with_prologue or has_code):
+        if not looks_like_code(rom_bytes, off, limit):
             continue
 
         end = None
@@ -428,8 +440,14 @@ def main():
         # That is a known limit of an unreviewed map, not something to paper over.
         lo = vram
         hi = max((v + sz for _, v, sz in funcs), default=vram)
-        targets = (call_targets(src) | resident_targets |
-                   {t for t in all_targets if lo <= t < hi})
+        sec_size = desc_sizes.get(rom, hi - lo)
+        # A cross-overlay call only becomes an entry point here if the bytes at
+        # that address in THIS overlay are code; otherwise the call means one of
+        # the other overlays sharing the destination.
+        cross = {t for t in all_targets if lo <= t < hi
+                 and looks_like_code(rom_bytes, rom + (t - vram),
+                                     rom + sec_size)}
+        targets = call_targets(src) | resident_targets | cross
         funcs = split_at_targets(funcs, targets)
         funcs = synthesize_missing(funcs, targets, rom_bytes, rom, vram,
                                    desc_sizes.get(rom, hi - lo))
