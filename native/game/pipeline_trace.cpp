@@ -13,6 +13,10 @@
 // hits -- the interesting question is whether a step happens at all, and an
 // unbounded log of a 60 Hz pipeline drowns it.
 #include <atomic>
+#include <string>
+#include <utility>
+#include <vector>
+#include <mutex>
 #include <cstdio>
 #include <cstdlib>
 
@@ -27,15 +31,55 @@ bool tracing() {
     return on;
 }
 
+constexpr int report_period = 60;  // one second of NTSC
+
+// Every step that has reported at least once, so the summary can give real
+// totals. A step reports its first few and then only every 60th, which means
+// counting the printed lines undercounts it by up to sixtyfold -- a trap worth
+// closing, because the periodic line and the total look alike at a glance.
+std::mutex steps_lock;
+std::vector<std::pair<std::string, std::atomic<int>*>>& steps() {
+    static std::vector<std::pair<std::string, std::atomic<int>*>> all;
+    return all;
+}
+
+// Most probes format their line into a stack buffer that dies on return, and
+// the tail of that line carries per-call values anyway. Keep a copy of just the
+// part before the first ':', which is the step's stable name.
+std::string step_name(const char* step) {
+    std::string name(step);
+    const std::size_t colon = name.find(':');
+    return colon == std::string::npos ? name : name.substr(0, colon);
+}
+
+void summarize() {
+    if (!tracing()) {
+        return;
+    }
+    std::lock_guard<std::mutex> held(steps_lock);
+    std::fprintf(stderr, "\n[pipeline] totals (every step, not just the ones printed)\n");
+    for (const auto& [step, seen] : steps()) {
+        std::fprintf(stderr, "[pipeline]   %-44s %d\n", step.c_str(), seen->load());
+    }
+    std::fflush(stderr);
+}
+
 void report(const char* step, std::atomic<int>& seen) {
     if (!tracing()) {
         return;
     }
     const int count = seen.fetch_add(1) + 1;
-    // After the first few, report periodically instead of stopping: whether a
+    if (count == 1) {
+        static const bool once = (std::atexit(summarize), true);
+        (void)once;
+        std::lock_guard<std::mutex> held(steps_lock);
+        steps().emplace_back(step_name(step), &seen);
+    }
+    // After the first few, report periodically rather than stopping: whether a
     // step happens at all is one question, and whether it keeps happening at
-    // frame rate is a different one. 300 is about five seconds of NTSC.
-    if (count <= report_limit || count % 60 == 0) {
+    // frame rate is a different one. The number in parentheses is how many
+    // times the step has run, not how many lines have been printed.
+    if (count <= report_limit || count % report_period == 0) {
         std::fprintf(stderr, "[pipeline] %s (%d)\n", step, count);
         std::fflush(stderr);
     }
@@ -132,12 +176,26 @@ void knife_edge_pipeline_callback(uint8_t* rdram, recomp_context* ctx) {
         return;
     }
     const uint32_t message = static_cast<uint32_t>(MEM_W(0x40, ctx->r29));
+    // This sits one instruction ahead of `lh $v0, 0x0($t6)`, which dereferences
+    // the message. Every message on this queue is an event pointer -- the
+    // dispatcher always sends the event struct -- so anything that is not a
+    // KSEG0 address faults on the very next instruction. Report those every
+    // time rather than on the sampling schedule, because the run ends there.
+    if (message < 0x80000000u || (message & 1u) != 0u) {
+        std::fprintf(stderr,
+                     "[pipeline] BAD MESSAGE on the frame-callback queue: "
+                     "0x%08X (sp 0x%08X) -- about to be dereferenced\n",
+                     message, static_cast<uint32_t>(ctx->r29));
+        std::fflush(stderr);
+        return;
+    }
     const gpr slot = static_cast<gpr>(static_cast<int32_t>(0x800EBC00));
+    const gpr msg = static_cast<gpr>(static_cast<int32_t>(message));
     char detail[160];
     std::snprintf(detail, sizeof(detail),
                   "frame-callback thread woke: message 0x%08X event_id %d "
                   "callback 0x%08X sp 0x%08X",
-                  message, static_cast<int>(static_cast<int32_t>(ctx->r2)),
+                  message, static_cast<int>(MEM_H(0, msg)),
                   static_cast<uint32_t>(MEM_W(0, slot)),
                   static_cast<uint32_t>(ctx->r29));
     report(detail, seen);
@@ -233,3 +291,10 @@ void knife_edge_pipeline_stalled(int32_t pending, int seconds) {
 }
 
 }  // extern "C"
+
+// The VI-limited run leaves through _Exit, which skips atexit on purpose: the
+// runtime never joins its guest OSThreads, so a normal teardown faults. Call
+// this from there instead, or the totals never print.
+extern "C" void knife_edge_pipeline_totals(void) {
+    summarize();
+}

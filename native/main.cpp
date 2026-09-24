@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "game_config.hpp"
+#include "game/pipeline_trace.h"
 #include "librecomp/game.hpp"
 #include "nfd.h"
 #include "recomp.h"
@@ -317,6 +318,7 @@ void vi_callback() {
             std::lock_guard lock{trace_mutex};
             function_trace_file.flush();
         }
+        knife_edge_pipeline_totals();
         std::fflush(nullptr);
         std::_Exit(EXIT_SUCCESS);
     }
@@ -553,6 +555,7 @@ int SDLCALL quit_watch(void*, SDL_Event* event) {
             std::lock_guard lock{trace_mutex};
             trace_file.flush();
         }
+        knife_edge_pipeline_totals();
         std::fflush(nullptr);
         std::_Exit(EXIT_SUCCESS);
     }

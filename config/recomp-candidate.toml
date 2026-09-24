@@ -232,7 +232,7 @@ text = "knife_edge_pipeline_retrace(rdram, ctx);"
 [[patches.hook]]
 # The frame-callback thread, just after osRecvMesg on its own queue returns.
 func = "func_800D2930"
-before_vram = 0x800D29C8
+before_vram = 0x800D29C4
 text = "knife_edge_pipeline_callback(rdram, ctx);"
 
 [[patches.hook]]

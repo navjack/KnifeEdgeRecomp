@@ -22,7 +22,7 @@ void knife_edge_pipeline_event_init(uint8_t* rdram, recomp_context* ctx);
 void knife_edge_pipeline_dispatch(uint8_t* rdram, recomp_context* ctx);
 void knife_edge_pipeline_frame(uint8_t* rdram, recomp_context* ctx);
 void knife_edge_pipeline_returned(uint8_t* rdram, recomp_context* ctx);
-void knife_edge_sp_probe(uint8_t* rdram, recomp_context* ctx, const char* tag);
+void knife_edge_pipeline_totals(void);
 
 /* Reported by the native busy-wait in guest_waits.cpp, not by a hook. */
 void knife_edge_pipeline_stalled(int32_t pending, int seconds);
