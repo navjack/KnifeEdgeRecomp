@@ -220,3 +220,31 @@ text = "knife_edge_guest_poll(rdram, ctx);"
 func = "ovl_0F4810_func_8017B778"
 before_vram = 0x8017BB30
 text = "knife_edge_guest_poll(rdram, ctx);"
+
+[[patches.hook]]
+# The retrace receiver thread, just after osRecvMesg on the VI queue returns.
+# Says whether ultramodern's retrace message reaches the game at all, which is
+# the first link of the chain that ends in a drawn frame.
+func = "func_800D2214"
+before_vram = 0x800D2284
+text = "knife_edge_pipeline_retrace(rdram, ctx);"
+
+[[patches.hook]]
+# The frame-callback thread, just after osRecvMesg on its own queue returns.
+func = "func_800D2930"
+before_vram = 0x800D29C0
+text = "knife_edge_pipeline_callback(rdram, ctx);"
+
+[[patches.hook]]
+# func_800D1FE0 entry. It zeroes the event-client list heads, so a second call
+# after clients have registered unregisters all of them.
+func = "func_800D1FE0"
+before_vram = 0x800D1FE4
+text = "knife_edge_pipeline_event_init(rdram, ctx);"
+
+[[patches.hook]]
+# func_800D23FC, immediately before it osSendMesgs to a matching client. a0 is
+# that client's queue, a1 the event pointer sent as the message.
+func = "func_800D23FC"
+before_vram = 0x800D2440
+text = "knife_edge_pipeline_dispatch(rdram, ctx);"

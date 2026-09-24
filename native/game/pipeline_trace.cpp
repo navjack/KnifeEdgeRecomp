@@ -84,6 +84,93 @@ void knife_edge_pipeline_completed(uint8_t* rdram, recomp_context* ctx) {
     report("task reported complete", seen);
 }
 
+// The retrace receiver thread has returned from osRecvMesg on the VI queue.
+// Its message is still on the stack at 0x44(sp); 0x29A is the retrace the
+// frame callback chain hangs off, so this says whether ultramodern's retrace
+// is reaching the game at all.
+void knife_edge_pipeline_retrace(uint8_t* rdram, recomp_context* ctx) {
+    static std::atomic<int> seen{0};
+    if (!tracing()) {
+        return;
+    }
+    const int32_t message = MEM_W(0x44, ctx->r29);
+    char detail[96];
+    std::snprintf(detail, sizeof(detail), "retrace receiver woke: message 0x%X",
+                  static_cast<uint32_t>(message));
+    report(detail, seen);
+
+    // Walk the event-client list the dispatcher is about to walk, once. Each
+    // node is {next, queue, mask:s16}; the dispatcher sends to every node whose
+    // mask overlaps the event id. Printing it says which clients are actually
+    // reachable, which is not something a queue's own counters can show.
+    static std::atomic<bool> walked{false};
+    bool expected = false;
+    if (!walked.compare_exchange_strong(expected, true)) {
+        return;
+    }
+    const gpr head_slot = static_cast<gpr>(static_cast<int32_t>(0x80142A18));
+    uint32_t node = static_cast<uint32_t>(MEM_W(0, head_slot));
+    for (int i = 0; i < 16 && node != 0; i++) {
+        const gpr at = static_cast<gpr>(static_cast<int32_t>(node));
+        const uint32_t next = static_cast<uint32_t>(MEM_W(0, at));
+        const uint32_t queue = static_cast<uint32_t>(MEM_W(4, at));
+        const int16_t mask = static_cast<int16_t>(MEM_H(8, at));
+        std::fprintf(stderr,
+                     "[pipeline]   client %d: node 0x%08X queue 0x%08X mask %d\n",
+                     i, node, queue, static_cast<int>(mask));
+        node = next;
+    }
+    std::fflush(stderr);
+}
+
+// The frame-callback thread, just after osRecvMesg on its own queue returns.
+// The message is a pointer to the event id, and D_800EBC00 holds the callback
+// the overlay registered -- the one that sets the flag the title loop spins on.
+void knife_edge_pipeline_callback(uint8_t* rdram, recomp_context* ctx) {
+    static std::atomic<int> seen{0};
+    if (!tracing()) {
+        return;
+    }
+    const uint32_t message = static_cast<uint32_t>(MEM_W(0x40, ctx->r29));
+    const gpr slot = static_cast<gpr>(static_cast<int32_t>(0x800EBC00));
+    char detail[128];
+    std::snprintf(detail, sizeof(detail),
+                  "frame-callback thread woke: message 0x%08X callback 0x%08X",
+                  message, static_cast<uint32_t>(MEM_W(0, slot)));
+    report(detail, seen);
+}
+
+// func_800D23FC, the event dispatcher, at the point where it is about to
+// osSendMesg to one client. a0 is the queue and a1 the event pointer it sends
+// as the message, so this shows exactly what each client is handed.
+void knife_edge_pipeline_dispatch(uint8_t* rdram, recomp_context* ctx) {
+    static std::atomic<int> seen{0};
+    if (!tracing()) {
+        return;
+    }
+    char detail[112];
+    std::snprintf(detail, sizeof(detail),
+                  "dispatch: queue 0x%08X <- event 0x%08X",
+                  static_cast<uint32_t>(ctx->r4), static_cast<uint32_t>(ctx->r5));
+    report(detail, seen);
+}
+
+// func_800D1FE0, which zeroes the four event-client list heads at
+// D_801423B0+0x668. Called once at boot it is initialisation; called again
+// after a client has registered it silently unregisters every one of them,
+// and the per-frame callback chain simply stops.
+void knife_edge_pipeline_event_init(uint8_t* rdram, recomp_context* ctx) {
+    static std::atomic<int> seen{0};
+    if (!tracing()) {
+        return;
+    }
+    char detail[96];
+    std::snprintf(detail, sizeof(detail),
+                  "event system init: a0=%d a1=%d (clears the client lists)",
+                  static_cast<int>(ctx->r4), static_cast<int>(ctx->r5));
+    report(detail, seen);
+}
+
 // Called from the native busy-wait once it has been spinning long enough that
 // something is clearly wrong, so a stalled run says what it is still holding
 // out for instead of just hanging.
