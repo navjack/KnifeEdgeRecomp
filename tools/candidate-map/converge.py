@@ -123,7 +123,22 @@ def main():
         probe = run(["../build/N64Recomp/N64Recomp", "recomp-candidate.toml"],
                     cwd=ROOT / "config")
         text = probe.stdout + probe.stderr
-        if "Error recompiling" not in text:
+        # Check the exit status, not just the absence of "Error recompiling".
+        # N64Recomp can recompile every function and then die writing its
+        # output -- a SIGBUS (exit 138) with lookup.cpp and recomp_overlays.inl
+        # missing looks exactly like success to a log grep.
+        if probe.returncode != 0 and "Error recompiling" not in text:
+            print(f"round {attempt}: N64Recomp exited {probe.returncode} with no "
+                  f"per-function error -- it crashed rather than rejecting a "
+                  f"function. Not something this loop can fix; diagnose by hand.")
+            print("\n".join(l for l in text.splitlines()
+                             if not l.startswith("[Info]"))[-1500:])
+            return 1
+        if probe.returncode == 0 and "Error recompiling" not in text:
+            for artifact in ("funcs.h", "lookup.cpp", "recomp_overlays.inl"):
+                if not (ROOT / "generated-candidate" / artifact).exists():
+                    print(f"round {attempt}: exit 0 but {artifact} missing")
+                    return 1
             print(f"round {attempt}: clean")
             print(gen.stdout.strip())
             return 0

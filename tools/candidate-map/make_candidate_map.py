@@ -312,6 +312,24 @@ def synthesize_missing(funcs, targets, rom_bytes, sec_rom, sec_vram, sec_size):
             continue
         off = sec_rom + (target - sec_vram)
         limit = min(off + 0x2000, sec_rom + sec_size, len(rom_bytes))
+
+        # Only invent a function where the bytes actually look like one.
+        # Overlays share destinations, so a call from one overlay names an
+        # address that is data in most of the others; synthesising there
+        # produces a function over data, which N64Recomp then chokes on with
+        # things like "Unhandled instruction: movn" -- an instruction that
+        # appears nowhere in the whole disassembly.
+        window = rom_bytes[off:min(off + 0x400, limit)]
+        words = [struct.unpack(">I", window[i:i + 4])[0]
+                 for i in range(0, len(window) - 3, 4)]
+        if not words:
+            continue
+        starts_with_prologue = (words[0] & 0xFFFF8000) == 0x27BD8000
+        has_code = any((w & 0xFFFF8000) == 0x27BD8000 for w in words) or \
+                   any(w == JR_RA for w in words)
+        if not (starts_with_prologue or has_code):
+            continue
+
         end = None
         for pc in range(off, limit - 4, 4):
             if struct.unpack(">I", rom_bytes[pc:pc + 4])[0] == JR_RA:
