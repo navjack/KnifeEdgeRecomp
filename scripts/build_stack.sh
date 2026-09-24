@@ -41,6 +41,12 @@ done
 
 # Each patch is applied only when its marker string is absent, so re-running
 # this script is a no-op, and never over unrelated local edits.
+#
+# Two patches can legitimately touch the same file, so once this run has patched
+# a file, that file is no longer expected to be clean. Only files this run has
+# not touched get the clean-tree check.
+PATCHED_FILES=""
+
 apply_patch() {
     repo=$1
     patch=$2
@@ -50,12 +56,18 @@ apply_patch() {
     if grep -qF "$marker" "$ROOT/upstream/$repo/$file"; then
         return
     fi
-    if ! git -C "$ROOT/upstream/$repo" diff --quiet -- "$file"; then
-        echo "Refusing to apply patches/$patch over existing local edits in $file"
-        exit 2
-    fi
+    case " $PATCHED_FILES " in
+        *" $repo/$file "*) ;;
+        *)
+            if ! git -C "$ROOT/upstream/$repo" diff --quiet -- "$file"; then
+                echo "Refusing to apply patches/$patch over existing local edits in $file"
+                exit 2
+            fi
+            ;;
+    esac
     git -C "$ROOT/upstream/$repo" apply --check "$ROOT/patches/$patch"
     git -C "$ROOT/upstream/$repo" apply "$ROOT/patches/$patch"
+    PATCHED_FILES="$PATCHED_FILES $repo/$file"
     echo "applied patches/$patch"
 }
 
@@ -65,8 +77,8 @@ apply_patch N64Recomp N64Recomp-cop0-registers.patch \
     "cop0_regs[32]" include/recomp.h
 apply_patch N64Recomp N64Recomp-fpu64-conversions.patch \
     "cpu_trunc_l_s" src/operations.cpp
-# recompilation.cpp already carries the cache-noop patch, so this one is checked
-# by its own marker rather than by requiring a clean file.
+# This one lands in recompilation.cpp too, which the cache-noop patch above has
+# already modified; apply_patch tracks that and checks it with git apply --check.
 apply_patch N64Recomp N64Recomp-zero-register-writes.patch \
     'Writes to $zero have no effect' src/recompilation.cpp
 
