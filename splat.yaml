@@ -47,9 +47,205 @@ segments:
     bss_size: 0x7BCA0
     subsegments:
       - [0x1050, asm]
+      # ROM 0x23DF0-0x27200 is RSP microcode embedded in the resident segment,
+      # not CPU text: 895 COP2 and 506 LWC2/SWC2 words with zero MIPS function
+      # prologues, against zero COP2 anywhere in the real CPU text. Splat
+      # disassembles it as MIPS otherwise and invents functions like
+      # func_800E51F0, an 8-byte "j 0x84001064" into RSP IMEM.
+      - [0x23DF0, bin]
       - [0x27200, data]
       - { type: bss, vram: 0x800EEF50 }
-  - type: bin
+  - name: ovl_02DB50
+    type: bin
     start: 0x2DB50
-    follows_vram: main
+  - name: ovl_02FC30
+    type: code
+    start: 0x2FC30
+    vram: 0x8016D6F0
+    subsegments:
+      - [0x2FC30, asm]
+  - name: ovl_034BE0
+    type: bin
+    start: 0x34BE0
+  - name: ovl_03D600
+    type: code
+    start: 0x3D600
+    vram: 0x8017B0C0
+    subsegments:
+      - [0x3D600, asm]
+  - name: ovl_03DF80
+    type: bin
+    start: 0x3DF80
+  - type: bin
+    start: 0x41630
+  - name: ovl_041650
+    type: code
+    start: 0x41650
+    vram: 0x8017B0C0
+    subsegments:
+      - [0x41650, asm]
+  - name: ovl_042E70
+    type: bin
+    start: 0x42E70
+  - type: bin
+    start: 0x4C7D0
+  - name: ovl_079B90
+    type: bin
+    start: 0x79B90
+  - name: ovl_0BA450
+    type: code
+    start: 0xBA450
+    vram: 0x801DC320
+    subsegments:
+      - [0xBA450, asm]
+  - type: bin
+    start: 0xCCB00
+  - name: ovl_0EF7C0
+    type: code
+    start: 0xEF7C0
+    vram: 0x8017B0C0
+    subsegments:
+      - [0xEF7C0, asm]
+  - name: ovl_0F3A80
+    type: bin
+    start: 0xF3A80
+  - type: bin
+    start: 0xF3F00
+  - name: ovl_0F4810
+    type: code
+    start: 0xF4810
+    vram: 0x8017B0C0
+    subsegments:
+      - [0xF4810, asm]
+  - name: ovl_0F5440
+    type: bin
+    start: 0xF5440
+  - type: bin
+    start: 0xFDFF0
+  - name: ovl_111CC0
+    type: code
+    start: 0x111CC0
+    vram: 0x8017B0C0
+    subsegments:
+      - [0x111CC0, asm]
+  - name: ovl_114EE0
+    type: bin
+    start: 0x114EE0
+  - type: bin
+    start: 0x1150E0
+  - name: ovl_1199D0
+    type: code
+    start: 0x1199D0
+    vram: 0x8017B0C0
+    subsegments:
+      - [0x1199D0, asm]
+  - name: ovl_11CA40
+    type: bin
+    start: 0x11CA40
+  - type: bin
+    start: 0x12C1A0
+  - name: ovl_12C2F0
+    type: code
+    start: 0x12C2F0
+    vram: 0x8017B0C0
+    subsegments:
+      - [0x12C2F0, asm]
+  - name: ovl_12E8F0
+    type: bin
+    start: 0x12E8F0
+  - type: bin
+    start: 0x12FBE0
+  - name: ovl_1501A0
+    type: code
+    start: 0x1501A0
+    vram: 0x8016D6F0
+    subsegments:
+      - [0x1501A0, asm]
+  - name: ovl_183700
+    type: bin
+    start: 0x183700
+  - type: bin
+    start: 0x199640
+  - name: ovl_1B66F0
+    type: code
+    start: 0x1B66F0
+    vram: 0x801D21F0
+    subsegments:
+      - [0x1B66F0, asm]
+  - name: ovl_1E6420
+    type: bin
+    start: 0x1E6420
+  - type: bin
+    start: 0x22C680
+  - name: ovl_255660
+    type: code
+    start: 0x255660
+    vram: 0x801D21F0
+    subsegments:
+      - [0x255660, asm]
+  - name: ovl_2A75B0
+    type: bin
+    start: 0x2A75B0
+  - type: bin
+    start: 0x30B090
+  - name: ovl_336A10
+    type: bin
+    start: 0x336A10
+  - type: bin
+    start: 0x345300
+  - name: ovl_34B590
+    type: code
+    start: 0x34B590
+    vram: 0x801D21F0
+    subsegments:
+      - [0x34B590, asm]
+  - name: ovl_378CC0
+    type: bin
+    start: 0x378CC0
+  - type: bin
+    start: 0x3C3DD0
+  - name: ovl_3EFDD0
+    type: code
+    start: 0x3EFDD0
+    vram: 0x801D21F0
+    subsegments:
+      - [0x3EFDD0, asm]
+  - name: ovl_42B310
+    type: bin
+    start: 0x42B310
+  - type: bin
+    start: 0x473E60
+  - name: ovl_497140
+    type: code
+    start: 0x497140
+    vram: 0x801D21F0
+    subsegments:
+      - [0x497140, asm]
+  - name: ovl_4A30E0
+    type: bin
+    start: 0x4A30E0
+  - type: bin
+    start: 0x4C0300
+  - name: ovl_4D5FC0
+    type: code
+    start: 0x4D5FC0
+    vram: 0x801DC320
+    subsegments:
+      - [0x4D5FC0, asm]
+  - type: bin
+    start: 0x4DC330
+  - name: ovl_4DC6D0
+    type: code
+    start: 0x4DC6D0
+    vram: 0x801D21F0
+    subsegments:
+      - [0x4DC6D0, asm]
+  - name: ovl_514B40
+    type: bin
+    start: 0x514B40
+  - name: ovl_5571B0
+    type: bin
+    start: 0x5571B0
+  - type: bin
+    start: 0x580480
   - [0x800000]

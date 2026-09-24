@@ -1,7 +1,34 @@
-# One section name per line. Sections listed here are recompiled so they can be
-# loaded at a runtime address that differs from their link address, which is
-# what overlays need.
+# One section name per line. Sections listed here are recompiled so they can run
+# at a runtime address that differs from their link address, which is what
+# overlays need.
 #
-# Knife Edge loads its resident code as one fixed segment at 0x800C2400, so no
-# section is relocatable yet. Add overlay section names here as the resource
-# table at 0x800E8600 is decoded (see docs/ROM_ANALYSIS.md).
+# Knife Edge's resident code at 0x800C2400 is fixed and is NOT listed. Every
+# ovl_* section below is DMA'd in at runtime by the loaders at 0x800C3848
+# (code; invalidates the instruction cache) and 0x800C38C8 (data). Five
+# destination addresses are shared by more than one overlay, so these really do
+# have to be relocatable rather than merely loaded once:
+#
+#   0x8016D6F0  ovl_02FC30 ovl_1501A0
+#   0x8017B0C0  ovl_03D600 ovl_041650 ovl_0EF7C0 ovl_0F4810
+#               ovl_111CC0 ovl_1199D0 ovl_12C2F0
+#   0x801D21F0  ovl_1B66F0 ovl_255660 ovl_34B590 ovl_3EFDD0 ovl_497140 ovl_4DC6D0
+#   0x801DC320  ovl_0BA450 ovl_4D5FC0
+#
+# Generated from tools/overlay-map/overlay_map.py; see docs/ROM_ANALYSIS.md.
+ovl_02FC30
+ovl_03D600
+ovl_041650
+ovl_0BA450
+ovl_0EF7C0
+ovl_0F4810
+ovl_111CC0
+ovl_1199D0
+ovl_12C2F0
+ovl_1501A0
+ovl_1B66F0
+ovl_255660
+ovl_34B590
+ovl_3EFDD0
+ovl_497140
+ovl_4D5FC0
+ovl_4DC6D0

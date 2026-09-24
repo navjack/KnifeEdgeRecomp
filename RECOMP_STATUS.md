@@ -25,33 +25,57 @@ Updated 2026-09-24.
 - Upstream pins and four generic recompiler patches are locked with SHA-256
   fingerprints in `UPSTREAM_PINS.txt`.
 
+## Overlay recovery (2026-09-24)
+
+The overlay layout is fully recovered, which was the blocker for everything
+else. `tools/overlay-map/overlay_map.py` reads it straight out of the ROM:
+**36 descriptors, 17 of them code**, across 5 destinations that are reused by
+more than one overlay. The resident segment at `0x800C2400` is only the engine
+half; the gameplay code is a 205 KB module DMA'd to `0x8016D6F0`.
+
+`splat.yaml` now carries every overlay as its own segment. Recognised code went
+from 1.86% of the cartridge to 21.4%, and the candidate map from 566 functions
+in one section to **1,264 across 19 sections**. All of it is documented in
+`docs/ROM_ANALYSIS.md`, including the 0x28-byte descriptor struct and the four
+loaders that consume it.
+
+`tools/candidate-map/make_candidate_map.py` replaces the old awk generator and
+corrects four distinct ways Splat's boundaries are wrong: overlapping declared
+sizes, sizes that run past a function into a data blob, missing entry points for
+routines only ever reached by a call, and functions cut in half by a branch that
+crosses the cut.
+
+ROM `0x23DF0`–`0x27200` turned out to be RSP microcode embedded in the resident
+segment (895 COP2 words, zero MIPS prologues) and is now marked `bin`.
+
 ## Current gate
 
-**No reviewed game metadata exists, so no native code is generated.**
+**The candidate probe recompiles 1,263 of 1,264 functions.** The one holdout,
+`func_8017B3C8`, branches to `0x8017BA78` — past the end of its own overlay —
+so its boundary is still wrong.
 
-N64Recomp needs function boundaries, relocations, data symbols and overlay
-information. A raw ROM provides none of those. `scripts/recompile.sh` stops with
-an actionable message rather than manufacturing a placeholder binary.
+That number is a diagnostic, not a milestone: the candidate map is explicitly
+unreviewed, with no data symbols and no relocations, so it cannot produce a
+working game. It exists to show where the segmentation is still wrong, and it
+has now done most of that job.
 
 ## Next work, in order
 
-1. **Split and probe.** Run `bootstrap_decomp.sh`, `split_rom.sh`, then
-   `generate_candidate_symbols.sh`, and run the recompiler against
-   `config/recomp-candidate.toml`. The probe's failures are the fastest way to
-   find where the segment boundaries in `splat.yaml` are wrong — in particular
-   the text/data split at ROM `0x27200` and the suspected handwritten-RSP window
-   at `0x27178`–`0x271F8`.
-2. **Decode the `0x800E8600` resource table.** How many entries, and does any
-   entry carry code rather than data? Anything that does is a relocatable
-   section and belongs in `config/relocatable-sections.txt`.
-3. **Recover a reviewed symbol map** into `input/knife-edge.syms.toml`. See
-   `input/README.md` for the route Cruis'n USA took, including the live-capture
-   step that is what actually turns a candidate into a reviewed map.
-4. **Locate the audio microcode** by matching the canonical `aspMain` prologue,
-   and wire `M_AUDTASK` through the adapter in `rsp/`.
-5. **Determine the save type** from a real access path — EEPROM through SI, or
-   SRAM/FlashRAM at PI `0x08000000`. Until then `SAVE_TYPE` stays `None` in
-   `CMakeLists.txt`. Do not guess it.
+1. **Recover a reviewed symbol map** into `input/knife-edge.syms.toml`. This is
+   the long pole. See `input/README.md` for the route Cruis'n USA took,
+   including the live-capture step that is what actually turns a candidate into
+   a reviewed map. The section layout is no longer the unknown; function
+   boundaries, data symbols and relocations are.
+2. **Write the `rsp/` adapter.** RT64 handles F3DEX2 itself, so the first
+   version only has to route graphics tasks and refuse the rest loudly.
+3. **Locate the audio microcode** inside the `0x23DF0`–`0x27200` block by
+   matching the canonical `aspMain` prologue, then wire `M_AUDTASK` through the
+   adapter.
+4. **Bind the libultra boundaries** — `osContStartReadData`, `osContGetReadData`,
+   EEPROM/Pak I/O — to their runtime replacements. Cruis'n USA needed about a
+   dozen, and getting them wrong is what kept it off its title screen.
+5. **Settle the save type** from a real access path. SRAM and FlashRAM are ruled
+   out; confirm EEPROM or None. Until then `SAVE_TYPE` stays `None`.
 6. Build, package, and only then hand a bundle to a person for playtesting.
 
 ## Standing rules for this workspace

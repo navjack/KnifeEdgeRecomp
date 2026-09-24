@@ -9,3 +9,20 @@ entrypoint = 0x800C2400
 functions_per_output_file = 50
 recomp_include = "#include \"recomp.h\""
 uses_mips3_float_mode = false
+relocatable_sections_path = "relocatable-sections.txt"
+
+[patches]
+stubs = [
+    # TLB and exception-vector routines. These intentionally leave the normal C
+    # execution domain (tlbp/tlbr/tlbwi/eret), and after static recompilation
+    # there is no TLB to probe: the runtime hands the game flat RDRAM. They stay
+    # in the map so their addresses resolve, and are emitted as linkable no-ops
+    # until a native exception bridge exists.
+    "func_800DB6E0",  # __osProbeTLB  (mfc0 EntryHi, tlbp, tlbr)
+    "func_800DC074",
+    "func_800DC280",
+    "func_800DC2D0",
+    "func_800DB900",  # __osException, and 800DBE34 is a second entry into the
+    "func_800DBE34",  # same handwritten routine (it branches back to 800DBDEC)
+    "func_800DBF1C",
+]

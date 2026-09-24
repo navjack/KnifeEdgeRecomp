@@ -71,7 +71,60 @@ generate junk.
 
 ROM `0x27200` then begins the pointer table below.
 
-## Resource table at `0x800E8600`
+## Overlay layout
+
+The `0x800E8600` table is one descriptor among many. Four loaders consume them,
+and between them they pin down the struct:
+
+| Loader | Reads | Does |
+| --- | --- | --- |
+| `func_800C3968` | `[0]`,`[1]`,`[2]` | DMA only, 3-word descriptor |
+| `func_800C3930` | `[0]`,`[2]`,`[3]` | DMA only |
+| `func_800C38C8` | `+0x00..0x1C` | writeback dcache, inval dcache, DMA — **data** |
+| `func_800C3848` | `+0x00..0x24` | the above plus **inval icache** — **code** |
+
+```c
+struct OverlayDesc {      // 0x28 bytes
+    void* dest;           // 0x00  destination in RDRAM
+    void* destEnd;        // 0x04  end of destination (text + bss)
+    u32   romStart;       // 0x08
+    u32   romEnd;         // 0x0C
+    void* writebackStart; // 0x10  -> osWritebackDCache
+    void* writebackEnd;   // 0x14
+    void* invalStart;     // 0x18  -> osInvalDCache
+    void* invalEnd;       // 0x1C
+    void* icacheStart;    // 0x20  -> osInvalICache   (code overlays only)
+    void* icacheEnd;      // 0x24
+};
+```
+
+All of them DMA through `func_800D1D10(romStart, dest, size)`.
+
+The instruction-cache invalidate in `func_800C3848` is what proves these carry
+executable code; the descriptors themselves are classified individually in
+`tools/overlay-map/overlay_map.py` by MIPS prologue and `jr $ra` density.
+
+**36 descriptors, 17 of them code.** Every code descriptor is immediately
+followed by a data one at the contiguous destination — classic `{text, data}`
+module pairs. Five destinations are reused by more than one overlay, which is
+why they must be recompiled as relocatable sections rather than loaded once:
+
+| Swap point | Overlays |
+| --- | --- |
+| `0x8016D6F0` | 2 — a 20 KB boot module, and the 205 KB gameplay module at ROM `0x1501A0` |
+| `0x8017B0C0` | 8 |
+| `0x801D21F0` | 6 |
+| `0x801DC320` | 2 |
+| `0x80224140` | 2 |
+
+The resident segment at `0x800C2400` is therefore only the engine half. All six
+call targets that the first recompiler probe could not resolve
+(`0x801752D8`, `0x80178044`, `0x8017B678`, `0x8017BC34`, `0x80193B40`,
+`0x80196810`) fall inside the 205 KB module at `0x8016D6F0`.
+
+Run `tools/overlay-map/overlay_map.py <rom>` for the full table.
+
+## The descriptor at `0x800E8600`
 
 The first words of the data segment are a ROM→RDRAM load table:
 
@@ -106,18 +159,36 @@ GBI patch is expected — unlike Cruis'n Exotica, which needed one for an
 unmapped 2.08 build. Confirm from RT64's own identification at runtime rather
 than from this table.
 
-Audio microcode has **not** been located yet. No `aspMain` / `n_aspMain` name
-string is present, which is normal — Cruis'n USA's block was found by matching
-the canonical `aspMain` prologue bytes, and the same technique applies here.
-That search is the first task in `rsp/`.
+Audio microcode has **not** been positively identified, but the block it lives
+in has been found. ROM `0x23DF0`–`0x27200` (13 KB) sits inside the resident
+segment and is RSP microcode, not CPU code:
+
+| Region | COP2 | LWC2/SWC2 | MIPS prologues | `jr $ra` |
+| --- | --- | --- | --- | --- |
+| CPU text `0x1050`–`0x23DF0` | **0** | **0** | 362 | 606 |
+| `0x23DF0`–`0x27200` | **895** | **506** | **0** | 14 |
+
+Zero vector instructions anywhere in the real CPU text against 1,401 in that
+window is unambiguous. Splat disassembles it as MIPS unless told otherwise and
+invents functions like `func_800E51F0`, an 8-byte `j 0x84001064` — a jump
+straight into RSP IMEM. `splat.yaml` now marks it `bin`.
 
 ## Save type
 
-Not yet determined. The ROM contains no `eeprom`/`sram`/`flash` strings, so this
-has to come from the code: EEPROM goes through SI, while SRAM and FlashRAM are
-PI devices at `0x08000000`. Until it is established from a real access path,
-`KNIFE_EDGE_SAVE_TYPE` stays `None` in `CMakeLists.txt` and is a documented
-gate — it is not guessed.
+Narrowed, not settled. Enumerating every hardware register Splat symbolised
+gives a complete picture of what the game touches:
+
+- SP, MI, VI, AI, PI and SI are all present.
+- There is **no `D_A8xxxxxx` anywhere**, so the game never touches cartridge
+  domain 2 at `0x08000000`. **SRAM and FlashRAM are both ruled out.**
+- `func_800E0DF0` is `__osSiRawStartDma` (SI_STATUS busy test, SI_DRAM_ADDR,
+  then PIF_ADDR_RD64B or WR64B against `0x1FC007C0`). It is the only function
+  that touches PIF RAM.
+- `func_800E1150` and `func_800E3350` shift addresses by 3 and by 5 — 32-byte
+  pages — which is **Controller Pak**, not EEPROM's 8-byte blocks.
+
+So the device is EEPROM or nothing; EEPROM could not be confirmed from statics.
+`KNIFE_EDGE_SAVE_TYPE` stays `None` in `CMakeLists.txt` rather than guessed.
 
 ## Open questions
 
