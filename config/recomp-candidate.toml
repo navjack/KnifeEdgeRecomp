@@ -232,7 +232,7 @@ text = "knife_edge_pipeline_retrace(rdram, ctx);"
 [[patches.hook]]
 # The frame-callback thread, just after osRecvMesg on its own queue returns.
 func = "func_800D2930"
-before_vram = 0x800D29C0
+before_vram = 0x800D29C8
 text = "knife_edge_pipeline_callback(rdram, ctx);"
 
 [[patches.hook]]
@@ -248,3 +248,17 @@ text = "knife_edge_pipeline_event_init(rdram, ctx);"
 func = "func_800D23FC"
 before_vram = 0x800D2440
 text = "knife_edge_pipeline_dispatch(rdram, ctx);"
+
+[[patches.hook]]
+# The overlay's frame callback at entry, where a0 is the outstanding graphics
+# task count it uses to decide whether to draw this frame at all.
+func = "ovl_03D600_func_8017B170"
+before_vram = 0x8017B174
+text = "knife_edge_pipeline_frame(rdram, ctx);"
+
+[[patches.hook]]
+# Immediately after the frame callback returns, to compare sp against the value
+# at the receive above it.
+func = "func_800D2930"
+before_vram = 0x800D29F4
+text = "knife_edge_pipeline_returned(rdram, ctx);"

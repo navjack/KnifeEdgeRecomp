@@ -35,7 +35,7 @@ void report(const char* step, std::atomic<int>& seen) {
     // After the first few, report periodically instead of stopping: whether a
     // step happens at all is one question, and whether it keeps happening at
     // frame rate is a different one. 300 is about five seconds of NTSC.
-    if (count <= report_limit || count % 300 == 0) {
+    if (count <= report_limit || count % 60 == 0) {
         std::fprintf(stderr, "[pipeline] %s (%d)\n", step, count);
         std::fflush(stderr);
     }
@@ -133,10 +133,29 @@ void knife_edge_pipeline_callback(uint8_t* rdram, recomp_context* ctx) {
     }
     const uint32_t message = static_cast<uint32_t>(MEM_W(0x40, ctx->r29));
     const gpr slot = static_cast<gpr>(static_cast<int32_t>(0x800EBC00));
-    char detail[128];
+    char detail[160];
     std::snprintf(detail, sizeof(detail),
-                  "frame-callback thread woke: message 0x%08X callback 0x%08X",
-                  message, static_cast<uint32_t>(MEM_W(0, slot)));
+                  "frame-callback thread woke: message 0x%08X event_id %d "
+                  "callback 0x%08X sp 0x%08X",
+                  message, static_cast<int>(static_cast<int32_t>(ctx->r2)),
+                  static_cast<uint32_t>(MEM_W(0, slot)),
+                  static_cast<uint32_t>(ctx->r29));
+    report(detail, seen);
+}
+
+// The overlay's registered frame callback, at entry. Its only argument is the
+// count of graphics tasks still outstanding, and it skips the entire frame --
+// display list, flag and all -- when that count is above zero. If the count is
+// never zero when the callback runs, nothing is ever drawn.
+void knife_edge_pipeline_frame(uint8_t* rdram, recomp_context* ctx) {
+    static std::atomic<int> seen{0};
+    if (!tracing()) {
+        return;
+    }
+    char detail[96];
+    std::snprintf(detail, sizeof(detail), "frame callback: pending=%d -> %s",
+                  static_cast<int>(static_cast<int32_t>(ctx->r4)),
+                  static_cast<int32_t>(ctx->r4) > 0 ? "SKIPPED" : "drawing");
     report(detail, seen);
 }
 
@@ -153,6 +172,36 @@ void knife_edge_pipeline_dispatch(uint8_t* rdram, recomp_context* ctx) {
                   "dispatch: queue 0x%08X <- event 0x%08X",
                   static_cast<uint32_t>(ctx->r4), static_cast<uint32_t>(ctx->r5));
     report(detail, seen);
+}
+
+// Immediately after the frame callback returns. Printing sp here and at the
+// receive says whether the callback's call tree balanced the stack: $sp is an
+// ordinary register in the generated C, so a function that allocates a frame
+// and is cut off before restoring it moves sp permanently and every later
+// off($sp) in the caller reads the wrong word.
+void knife_edge_pipeline_returned(uint8_t* rdram, recomp_context* ctx) {
+    static std::atomic<int> seen{0};
+    if (!tracing()) {
+        return;
+    }
+    char detail[96];
+    std::snprintf(detail, sizeof(detail), "frame callback returned: sp 0x%08X",
+                  static_cast<uint32_t>(ctx->r29));
+    report(detail, seen);
+}
+
+// One sample of $sp, tagged with the call it follows. Walking these across a
+// function's call sites is how an unbalanced callee gets located: the tag whose
+// sp differs from the one before it names the call that leaked.
+void knife_edge_sp_probe(uint8_t* rdram, recomp_context* ctx, const char* tag) {
+    (void)rdram;
+    static std::atomic<int> seen{0};
+    if (!tracing() || seen.load() > 40) {
+        return;
+    }
+    seen.fetch_add(1);
+    std::fprintf(stderr, "[pipeline] sp after %-16s 0x%08X\n", tag,
+                 static_cast<uint32_t>(ctx->r29));
 }
 
 // func_800D1FE0, which zeroes the four event-client list heads at
