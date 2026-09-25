@@ -70,8 +70,6 @@ std::ofstream trace_file;
 std::ofstream function_trace_file;
 std::atomic_uint64_t vi_count = 0;
 uint64_t stop_after_vi = 0;
-// 0 keeps the runtime's original 60 Hz retrace.
-double vi_hz = 0.0;
 
 // Guest words to sample once per VI, appended to the trace as extra columns.
 // The point is to watch the game's own state evolve without a debugger: a
@@ -395,19 +393,6 @@ bool parse_runtime_options(int argc, char** argv) {
             }
             stop_after_vi = static_cast<uint64_t>(value);
         }
-        else if (argument == "--vi-hz") {
-            if (!has_value) {
-                std::fprintf(stderr, "--vi-hz requires a rate\n");
-                return false;
-            }
-            char* end = nullptr;
-            const double value = std::strtod(argv[++i], &end);
-            if (end == argv[i] || *end != '\0' || value <= 0.0 || value > 240.0) {
-                std::fprintf(stderr, "Invalid --vi-hz rate: '%s'\n", argv[i]);
-                return false;
-            }
-            vi_hz = value;
-        }
         else if (argument == "--watch") {
             if (!has_value) {
                 std::fprintf(stderr, "--watch requires a guest address\n");
@@ -690,17 +675,6 @@ int main(int argc, char** argv) {
         .error_handling_callbacks = {.message_box = recompui::message_box},
         .threads_callbacks = {.get_game_thread_name = get_thread_name},
     };
-
-    // The game advances one logical update per retrace and finishes its work
-    // in about 1.7 ms of a 16.7 ms frame, so here it runs 60 updates a second.
-    // Hardware could not sustain that, which is why this title is famously too
-    // fast under emulation. Lowering the retrace rate lowers game speed with it.
-    if (vi_hz > 0.0) {
-        const uint64_t period_us = static_cast<uint64_t>(1000000.0 / vi_hz + 0.5);
-        ultramodern::set_vi_period_us(period_us);
-        std::fprintf(stderr, "Retrace rate set to %.2f Hz (%llu us per VI)\n",
-                     vi_hz, static_cast<unsigned long long>(period_us));
-    }
 
     recomp::start(config);
 

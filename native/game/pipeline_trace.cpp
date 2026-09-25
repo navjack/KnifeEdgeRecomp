@@ -13,6 +13,8 @@
 // hits -- the interesting question is whether a step happens at all, and an
 // unbounded log of a 60 Hz pipeline drowns it.
 #include <atomic>
+#include <cmath>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -85,6 +87,123 @@ void report(const char* step, std::atomic<int>& seen) {
     }
 }
 
+
+// --- Matrix dump -----------------------------------------------------------
+//
+// KNIFE_EDGE_DUMP_MTX=<i>,<j>,... names graphics tasks by index (0-based, gfx
+// tasks only). For each, walk the display list the way F3DEX2 would -- segment
+// assignments, G_DL calls and branches, G_ENDDL -- and decode every matrix it
+// hands the RSP. The upper 3x3 of a modelview is a rotation times a scale, so
+// equal row norms and zero dot products mean the math is sound and only the
+// angle fed into it could be wrong; anything else means the math itself is.
+
+uint32_t guest_w(uint8_t* rdram, uint32_t kseg0) {
+    return static_cast<uint32_t>(MEM_W(0, static_cast<gpr>(static_cast<int32_t>(kseg0))));
+}
+
+int32_t guest_h(uint8_t* rdram, uint32_t kseg0) {
+    return MEM_H(0, static_cast<gpr>(static_cast<int32_t>(kseg0)));
+}
+
+uint32_t guest_hu(uint8_t* rdram, uint32_t kseg0) {
+    return MEM_HU(0, static_cast<gpr>(static_cast<int32_t>(kseg0)));
+}
+
+bool in_rdram(uint32_t phys, uint32_t len) {
+    return phys < 0x800000u && phys + len <= 0x800000u;
+}
+
+const std::set<int>& dump_indices() {
+    static const std::set<int> wanted = [] {
+        std::set<int> out;
+        const char* spec = std::getenv("KNIFE_EDGE_DUMP_MTX");
+        while (spec != nullptr && *spec != '\0') {
+            char* end = nullptr;
+            const long value = std::strtol(spec, &end, 10);
+            if (end == spec) {
+                break;
+            }
+            out.insert(static_cast<int>(value));
+            spec = (*end == ',') ? end + 1 : end;
+        }
+        return out;
+    }();
+    return wanted;
+}
+
+void dump_matrices(uint8_t* rdram, uint32_t display_list, int task_index) {
+    uint32_t segment[16] = {};
+    std::vector<uint32_t> returns;
+    uint32_t pc = display_list & 0x00FFFFFFu;
+    int found = 0;
+    std::fprintf(stderr, "[mtx] gfx task %d, display list 0x%08X\n", task_index, display_list);
+    for (int steps = 0; steps < 50000 && found < 12; steps++) {
+        if (!in_rdram(pc, 8)) {
+            std::fprintf(stderr, "[mtx]   walked off RDRAM at 0x%06X\n", pc);
+            break;
+        }
+        const uint32_t w0 = guest_w(rdram, 0x80000000u | pc);
+        const uint32_t w1 = guest_w(rdram, 0x80000000u | (pc + 4));
+        pc += 8;
+        const auto resolve = [&](uint32_t address) {
+            return segment[(address >> 24) & 0xF] + (address & 0x00FFFFFFu);
+        };
+        switch (w0 >> 24) {
+            case 0xDB:  // G_MOVEWORD
+                if (((w0 >> 16) & 0xFF) == 0x06) {  // G_MW_SEGMENT
+                    segment[((w0 & 0xFFFF) / 4) & 0xF] = w1 & 0x00FFFFFFu;
+                }
+                break;
+            case 0xDE:  // G_DL: 0 pushes a return, 1 is a plain branch
+                if (((w0 >> 16) & 0xFF) == 0) {
+                    returns.push_back(pc);
+                }
+                pc = resolve(w1);
+                break;
+            case 0xDF:  // G_ENDDL
+                if (returns.empty()) {
+                    steps = 1 << 30;
+                } else {
+                    pc = returns.back();
+                    returns.pop_back();
+                }
+                break;
+            case 0xDA: {  // G_MTX; F3DEX2 stores the params XORed with G_MTX_PUSH
+                const uint32_t m = resolve(w1);
+                const uint32_t params = (w0 & 0xFF) ^ 1u;
+                if (!in_rdram(m, 64)) {
+                    std::fprintf(stderr, "[mtx]   G_MTX -> 0x%08X outside RDRAM\n", w1);
+                    break;
+                }
+                float v[16];
+                for (int i = 0; i < 16; i++) {
+                    const uint32_t whole = guest_hu(rdram, 0x80000000u | (m + i * 2));
+                    const uint32_t frac = guest_hu(rdram, 0x80000000u | (m + 32 + i * 2));
+                    v[i] = static_cast<float>(static_cast<int32_t>((whole << 16) | frac)) / 65536.0f;
+                }
+                const auto dot = [&](int a, int b) {
+                    return v[a * 4] * v[b * 4] + v[a * 4 + 1] * v[b * 4 + 1] + v[a * 4 + 2] * v[b * 4 + 2];
+                };
+                std::fprintf(stderr,
+                             "[mtx]   #%d @0x%06X %s %s %s  |r0|=%.3f |r1|=%.3f |r2|=%.3f  "
+                             "r0.r1=%+.3f r0.r2=%+.3f r1.r2=%+.3f\n",
+                             found, m, (params & 4) ? "PROJ" : "MODL", (params & 2) ? "LOAD" : "MUL ",
+                             (params & 1) ? "PUSH" : "    ", std::sqrt(dot(0, 0)), std::sqrt(dot(1, 1)),
+                             std::sqrt(dot(2, 2)), dot(0, 1), dot(0, 2), dot(1, 2));
+                for (int r = 0; r < 4; r++) {
+                    std::fprintf(stderr, "[mtx]      %+10.4f %+10.4f %+10.4f %+10.4f\n",
+                                 v[r * 4], v[r * 4 + 1], v[r * 4 + 2], v[r * 4 + 3]);
+                }
+                found++;
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    std::fflush(stderr);
+}
+
 }  // namespace
 
 extern "C" {
@@ -106,12 +225,19 @@ void knife_edge_pipeline_submitted(uint8_t* rdram, recomp_context* ctx) {
 // osSpTaskStartGo_recomp only reads it.
 void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
     static std::atomic<int> seen{0};
-    if (!tracing()) {
-        return;
-    }
+    static std::atomic<int> gfx_tasks{0};
     const uint32_t task = static_cast<uint32_t>(ctx->r4);
     const int32_t type = MEM_W(0x0, ctx->r4);
     const int32_t data_ptr = MEM_W(0x30, ctx->r4);
+    if (type == 1 && !dump_indices().empty()) {
+        const int index = gfx_tasks.fetch_add(1);
+        if (dump_indices().count(index) != 0) {
+            dump_matrices(rdram, static_cast<uint32_t>(data_ptr), index);
+        }
+    }
+    if (!tracing()) {
+        return;
+    }
     char detail[128];
     std::snprintf(detail, sizeof(detail),
                   "osSpTaskStartGo returned: task 0x%08X type %d data_ptr 0x%08X",

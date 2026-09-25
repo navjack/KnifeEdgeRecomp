@@ -91,12 +91,6 @@ apply_patch N64Recomp N64Recomp-discard-bad-statics.patch \
 # over any other status write kills the game during ordinary libultra startup.
 apply_patch N64ModernRuntime N64ModernRuntime-cop0-status-tolerance.patch \
     "unhandled status register bits changed" librecomp/src/recomp.cpp
-# The VI thread paces itself at a fixed 60 Hz, and speed_multiplier is an
-# integer, so the runtime can only ever run a game faster than hardware. Knife
-# Edge paces itself off retrace and was tuned for an R4300 that could not
-# sustain 60 Hz, so it needs the rate lowered, not raised.
-apply_patch N64ModernRuntime N64ModernRuntime-settable-vi-rate.patch \
-    "Microseconds between vertical retraces" ultramodern/src/timer.cpp
 # This one lands in recompilation.cpp too, which the cache-noop patch above has
 # already modified; apply_patch tracks that and checks it with git apply --check.
 apply_patch N64Recomp N64Recomp-zero-register-writes.patch \
