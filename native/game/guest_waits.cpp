@@ -194,11 +194,10 @@ namespace {
 
 int rdp_retraces() {
     static const int value = [] {
-        // Default 2: the game draws at most every other retrace, 30 frames a
-        // second. Measured with the instruction counter, a game step costs the
-        // R4300 about 3-8 ms, so the console's CPU never limited the rate --
-        // its graphics chip did, and a Z-buffered, textured 320x240 scene
-        // commonly took it two or three retraces. 1 is uncapped, 3 is 20 fps.
+        // A fixed pacing, used when KNIFE_EDGE_RDP_VIS is set (which also
+        // turns the per-frame model off) and for the frames before the model's
+        // first estimate. 2 is 30 frames a second, 1 uncapped, 3 is 20 fps.
+        // Normally the model in pipeline_trace.cpp sets each frame's count.
         const char* text = std::getenv("KNIFE_EDGE_RDP_VIS");
         const int parsed = text != nullptr ? std::atoi(text) : 2;
         return parsed >= 1 ? parsed : 1;

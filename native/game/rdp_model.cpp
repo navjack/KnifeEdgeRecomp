@@ -28,8 +28,12 @@
 //
 //   Assumed, and marked so below: G_MTX cost, clipping work, RDP triangle and
 //     span setup, and sustained RDRAM bandwidth (~200 MB/s of the 562.5 MB/s
-//     peak). These are the model's free parameters; KNIFE_EDGE_RDP_MODEL_CSV
-//     records the raw counts so they can be varied offline.
+//     peak). KNIFE_EDGE_RDP_MODEL_CSV records the raw counts so they can be
+//     varied offline.
+//
+// The estimate this returns is the documented and measured cost only. The
+// pacing in pipeline_trace.cpp multiplies the RDP side by a factor fitted to
+// real-hardware footage (2.7), which absorbs what the assumptions miss.
 
 #include "rdp_model.h"
 
