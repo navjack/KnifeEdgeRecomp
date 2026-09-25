@@ -1,0 +1,27 @@
+--- a/src/recompilation.cpp
++++ b/src/recompilation.cpp
+@@ -143,6 +143,11 @@
+     } else {
+         generator.emit_comment(fmt::format("0x{:08X}: {}", instr_vram, instr.disassemble(0)));
+     }
++    // One per guest instruction executed: lets a port measure the work the
++    // original CPU would have done. Defined empty in recomp.h unless the port
++    // supplies its own before including it.
++    print_indent();
++    fmt::print(output_file, "RECOMP_COUNT_INSTR();\n");
+ 
+     // Replace loads for jump table entries into addiu. This leaves the jump table entry's address in the output register
+     // instead of the entry's value, which can then be used to determine the offset from the start of the jump table.
+--- a/include/recomp.h
++++ b/include/recomp.h
+@@ -91,6 +91,10 @@
+ 
+ #define SUB32(a, b) \
+     ((gpr)(int32_t)((a) - (b)))
++
++#ifndef RECOMP_COUNT_INSTR
++#define RECOMP_COUNT_INSTR() ((void)0)
++#endif
+ 
+ #define MEM_W(offset, reg) \
+     (*(int32_t*)(rdram + ((((reg) + (offset))) - 0xFFFFFFFF80000000)))

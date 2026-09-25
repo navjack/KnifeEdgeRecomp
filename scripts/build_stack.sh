@@ -89,6 +89,11 @@ apply_patch N64Recomp N64Recomp-discard-bad-statics.patch \
 
 # Only the FR bit has a host-side effect after static recompilation; exiting
 # over any other status write kills the game during ordinary libultra startup.
+# Emits RECOMP_COUNT_INSTR() beside every recompiled instruction -- a no-op
+# unless the port defines it -- so the port can measure the R4300 work each
+# game step does, the basis for pacing the game the way the console did.
+apply_patch N64Recomp N64Recomp-instruction-counter.patch \
+    "RECOMP_COUNT_INSTR" src/recompilation.cpp
 apply_patch N64ModernRuntime N64ModernRuntime-cop0-status-tolerance.patch \
     "unhandled status register bits changed" librecomp/src/recomp.cpp
 # This one lands in recompilation.cpp too, which the cache-noop patch above has

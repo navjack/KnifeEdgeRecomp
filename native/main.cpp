@@ -210,6 +210,16 @@ void queue_samples(int16_t* samples, size_t sample_count) {
     if (samples == nullptr || sample_count == 0) {
         return;
     }
+    // KNIFE_EDGE_DUMP_AUDIO=<file>: the guest's own samples, raw interleaved
+    // stereo s16 at the AI rate, before volume or resampling. Used to measure
+    // whether the music's tempo follows the game's step rate.
+    static FILE* audio_dump = [] {
+        const char* path = std::getenv("KNIFE_EDGE_DUMP_AUDIO");
+        return path != nullptr ? std::fopen(path, "wb") : nullptr;
+    }();
+    if (audio_dump != nullptr) {
+        std::fwrite(samples, sizeof(int16_t), sample_count, audio_dump);
+    }
     const float volume = std::clamp(
         static_cast<float>(recompui::config::sound::get_main_volume() / 100.0), 0.0f, 1.0f);
 
@@ -325,6 +335,7 @@ void vi_callback() {
         knife_edge_pipeline_totals();
         knife_edge_guest_waits_totals();
         knife_edge_rdp_gate_totals();
+        knife_edge_cpu_cost_totals();
         std::fflush(nullptr);
         std::_Exit(EXIT_SUCCESS);
     }
@@ -610,6 +621,7 @@ int SDLCALL quit_watch(void*, SDL_Event* event) {
         knife_edge_pipeline_totals();
         knife_edge_guest_waits_totals();
         knife_edge_rdp_gate_totals();
+        knife_edge_cpu_cost_totals();
         std::fflush(nullptr);
         std::_Exit(EXIT_SUCCESS);
     }

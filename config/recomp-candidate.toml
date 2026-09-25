@@ -7,7 +7,7 @@ symbols_file_path = "../decomp/knife-edge.candidate.syms.toml"
 output_func_path = "../generated-candidate"
 entrypoint = 0x800C2400
 functions_per_output_file = 50
-recomp_include = "#include \"recomp.h\"\n#include \"game/overlay_bridge.h\"\n#include \"game/pipeline_trace.h\"\n#include \"game/guest_waits.h\"\n#include \"game/rumble.h\""
+recomp_include = "#include \"game/cpu_cost.h\"\n#include \"recomp.h\"\n#include \"game/overlay_bridge.h\"\n#include \"game/pipeline_trace.h\"\n#include \"game/guest_waits.h\"\n#include \"game/rumble.h\""
 uses_mips3_float_mode = false
 # relocatable_sections_path is deliberately NOT set.
 #

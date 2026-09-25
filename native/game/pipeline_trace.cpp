@@ -13,6 +13,7 @@
 // hits -- the interesting question is whether a step happens at all, and an
 // unbounded log of a 60 Hz pipeline drowns it.
 #include <atomic>
+#include <algorithm>
 #include <execinfo.h>
 #include <cstring>
 #include <cmath>
@@ -24,6 +25,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "cpu_cost.h"
 #include "recomp.h"
 
 namespace {
@@ -140,6 +142,13 @@ std::atomic<int> gfx_tasks_started{0};
 // Every graphics task started, tracing or not: the hang watchdog's heartbeat.
 std::atomic<long long> gfx_tasks_total{0};
 
+// Guest instructions of real work per game step, one entry per graphics task.
+std::mutex step_costs_lock;
+std::vector<uint64_t>& step_costs() {
+    static std::vector<uint64_t> all;
+    return all;
+}
+
 // The guMtxF2L call site that ran last, set by a hook just before each jal.
 std::atomic<uint32_t> f2l_site{0};
 
@@ -242,6 +251,15 @@ void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
     const int32_t data_ptr = MEM_W(0x30, ctx->r4);
     if (type == 1) {
         gfx_tasks_total.fetch_add(1, std::memory_order_relaxed);
+        // Guest work (all threads, minus spinning) since the previous
+        // graphics task: what one game step cost the CPU.
+        static uint64_t last_work = 0;
+        const uint64_t work = knife_edge_guest_instructions - knife_edge_idle_instructions;
+        if (last_work != 0) {
+            std::lock_guard<std::mutex> held(step_costs_lock);
+            step_costs().push_back(work - last_work);
+        }
+        last_work = work;
     }
     if (type == 1 && !dump_indices().empty()) {
         const int index = gfx_tasks_started.fetch_add(1);
@@ -612,4 +630,36 @@ extern "C" void knife_edge_cat_probe(uint8_t* rdram, recomp_context* ctx, uint32
 
 extern "C" long long knife_edge_gfx_tasks_total(void) {
     return gfx_tasks_total.load(std::memory_order_relaxed);
+}
+
+// Printed at exit: how much R4300 work a game step took. At 93.75 MHz, a step
+// that needs more than 1,562,500 instruction-cycles cannot finish within one
+// 16.7 ms retrace on the real console.
+extern "C" void knife_edge_cpu_cost_totals(void) {
+    std::lock_guard<std::mutex> held(step_costs_lock);
+    std::vector<uint64_t> costs = step_costs();
+    if (costs.empty()) {
+        return;
+    }
+    std::sort(costs.begin(), costs.end());
+    const auto at = [&](double q) { return costs[static_cast<size_t>(q * (costs.size() - 1))]; };
+    std::fprintf(stderr, "\n[cpu] %zu steps; guest instructions of work per step: "
+                 "min %llu, median %llu, p90 %llu, max %llu (idle spinning excluded: %llu of %llu)\n",
+                 costs.size(), (unsigned long long)costs.front(), (unsigned long long)at(0.5),
+                 (unsigned long long)at(0.9), (unsigned long long)costs.back(),
+                 (unsigned long long)knife_edge_idle_instructions,
+                 (unsigned long long)knife_edge_guest_instructions);
+    // The same for the most recent stretch alone, which in a run that ends in
+    // a level is the gameplay: steps from the attract loop and menus are
+    // lighter and would pull the whole-run figures down.
+    std::vector<uint64_t> tail = step_costs();
+    if (tail.size() > 1000) {
+        tail.erase(tail.begin(), tail.end() - 1000);
+    }
+    std::sort(tail.begin(), tail.end());
+    const auto tail_at = [&](double q) { return tail[static_cast<size_t>(q * (tail.size() - 1))]; };
+    std::fprintf(stderr, "[cpu] last %zu steps: median %llu, p90 %llu, p99 %llu, max %llu\n", tail.size(),
+                 (unsigned long long)tail_at(0.5), (unsigned long long)tail_at(0.9),
+                 (unsigned long long)tail_at(0.99), (unsigned long long)tail.back());
+    std::fflush(stderr);
 }

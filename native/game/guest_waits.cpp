@@ -37,6 +37,7 @@
 #include <cstdio>
 #include <chrono>
 #include "guest_waits.h"
+#include "cpu_cost.h"
 #include "pipeline_trace.h"
 
 namespace {
@@ -104,6 +105,9 @@ extern "C" void knife_edge_guest_poll(uint8_t* rdram, recomp_context* ctx) {
 // frame is running the game faster than a 93.75 MHz R4300 ever could, which is
 // the shape of this game's well-known "too fast everywhere" problem. Telling
 // those apart needs a per-loop count, not a total.
+uint64_t knife_edge_guest_instructions = 0;
+uint64_t knife_edge_idle_instructions = 0;
+
 extern "C" void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
                                            uint32_t site) {
     (void)ctx;
@@ -124,13 +128,26 @@ extern "C" void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
     // Keyed on the thread and time, not the site: the gameplay wait alternates
     // between two hooked branches, and resetting on every change of site meant
     // it never counted as spinning and held a core at 100%.
-    if (now - spin_last > std::chrono::microseconds{500}) {
+    // Instructions run since this thread's last poll, while it kept spinning,
+    // are the wait loop going round: idle time on the console, not work.
+    thread_local uint64_t spin_mark = 0;
+    const bool continuing = now - spin_last <= std::chrono::microseconds{500};
+    // Only a short gap counts: a spin path is at most 32 instructions (the
+    // scanner's own limit), so a longer run between two polls went through
+    // real work -- the gameplay main loop passes its hooked branch after the
+    // whole world update, which natively takes well under the 500 us window.
+    const uint64_t since_last_poll = knife_edge_guest_instructions - spin_mark;
+    if (continuing && since_last_poll <= 64) {
+        knife_edge_idle_instructions += since_last_poll;
+    }
+    if (!continuing) {
         spin_first = now;
     }
     spin_last = now;
     const bool spinning = now - spin_first > std::chrono::milliseconds{2};
     ultramodern::wait_for_external_message_timed(rdram, spinning ? poll_interval_ms : 0);
     ultramodern::check_running_queue(rdram);
+    spin_mark = knife_edge_guest_instructions;
 }
 
 // Printed alongside the pipeline totals, so the counts can be read against the
@@ -169,8 +186,13 @@ namespace {
 
 int rdp_retraces() {
     static const int value = [] {
+        // Default 2: the game draws at most every other retrace, 30 frames a
+        // second. Measured with the instruction counter, a game step costs the
+        // R4300 about 3-8 ms, so the console's CPU never limited the rate --
+        // its graphics chip did, and a Z-buffered, textured 320x240 scene
+        // commonly took it two or three retraces. 1 is uncapped, 3 is 20 fps.
         const char* text = std::getenv("KNIFE_EDGE_RDP_VIS");
-        const int parsed = text != nullptr ? std::atoi(text) : 1;
+        const int parsed = text != nullptr ? std::atoi(text) : 2;
         return parsed >= 1 ? parsed : 1;
     }();
     return value;
