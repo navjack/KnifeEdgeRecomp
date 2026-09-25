@@ -261,7 +261,7 @@ text = "knife_edge_pipeline_frame(rdram, ctx);"
 # at the receive above it.
 func = "func_800D2930"
 before_vram = 0x800D29F4
-text = "knife_edge_pipeline_returned(rdram, ctx);"
+text = "knife_edge_pipeline_returned(rdram, ctx); knife_edge_rdp_gate_after(rdram, ctx);"
 
 # Title and attract waits, one per overlay. Each spins on the next-state id
 # D_8011D1B4 and the controller word D_8010BAD0, and reaches no os* call --
@@ -612,3 +612,12 @@ text = "knife_edge_cat_probe(rdram, ctx, 0x800D6F30);"
 func = "func_800D6D20"
 before_vram = 0x800D6D20
 text = "knife_edge_cat_probe(rdram, ctx, 0x800D6D20);"
+
+[[patches.hook]]
+# Just before the retrace callback is handed the pending graphics-task count:
+# KNIFE_EDGE_RDP_VIS simulates the RDP still drawing (see guest_waits.cpp).
+# Its partner runs from the 0x800D29F4 hook, straight after the call.
+func = "func_800D2930"
+before_vram = 0x800D29EC
+text = "knife_edge_rdp_gate_before(rdram, ctx);"
+

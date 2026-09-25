@@ -130,3 +130,81 @@ extern "C" void knife_edge_guest_waits_totals(void) {
     }
     std::fflush(stderr);
 }
+
+// --- Simulated RDP drawing time ---------------------------------------------
+//
+// Knife Edge advances only on retraces when no graphics task is outstanding:
+// every frame callback opens with `bgtz pending_gfx_tasks, skip`. On hardware
+// the RSP and RDP take real time to draw a scene, so retraces go by while a
+// frame is still being drawn and the game skips them. Here RT64 finishes at
+// once, so nothing is ever pending and the game steps on every retrace.
+//
+// KNIFE_EDGE_RDP_VIS=N stands in for that drawing time: after the game draws
+// on a retrace, the next N-1 retraces see the pending count as 1, so the game's
+// own skip check rations its steps the way the hardware did. Only the value the
+// callback is handed changes, and only for the duration of that call -- the
+// real count is put back straight after -- so the game's accounting of
+// submitted and completed tasks is untouched, and the retrace itself stays at
+// 60 Hz, which leaves audio alone.
+namespace {
+
+int rdp_retraces() {
+    static const int value = [] {
+        const char* text = std::getenv("KNIFE_EDGE_RDP_VIS");
+        const int parsed = text != nullptr ? std::atoi(text) : 1;
+        return parsed >= 1 ? parsed : 1;
+    }();
+    return value;
+}
+
+uint64_t retraces_seen = 0;
+uint64_t last_drawn = 0;
+bool forced_busy = false;
+uint64_t steps_allowed = 0;
+uint64_t steps_held = 0;
+
+}  // namespace
+
+// Just before func_800D2930 hands the retrace callback the pending count. The
+// callback runs on this thread without yielding when it skips, so nothing else
+// observes the temporary value.
+extern "C" void knife_edge_rdp_gate_before(uint8_t* rdram, recomp_context* ctx) {
+    (void)ctx;
+    retraces_seen++;
+    forced_busy = false;
+    if (rdp_retraces() <= 1) {
+        return;
+    }
+    const gpr counter = static_cast<gpr>(static_cast<int32_t>(pending_gfx_tasks_vram));
+    if (MEM_W(0, counter) != 0) {
+        return;  // really still drawing: the game skips on its own
+    }
+    if (retraces_seen - last_drawn < static_cast<uint64_t>(rdp_retraces())) {
+        MEM_W(0, counter) = 1;
+        forced_busy = true;
+        steps_held++;
+    } else {
+        last_drawn = retraces_seen;
+        steps_allowed++;
+    }
+}
+
+// Straight after the callback returns: put the real count back.
+extern "C" void knife_edge_rdp_gate_after(uint8_t* rdram, recomp_context* ctx) {
+    (void)ctx;
+    if (forced_busy) {
+        MEM_W(0, static_cast<gpr>(static_cast<int32_t>(pending_gfx_tasks_vram))) = 0;
+        forced_busy = false;
+    }
+}
+
+extern "C" void knife_edge_rdp_gate_totals(void) {
+    if (rdp_retraces() <= 1) {
+        return;
+    }
+    std::fprintf(stderr, "[rdp] %d retraces per drawn frame: %llu retraces, %llu steps allowed, %llu held\n",
+                 rdp_retraces(), static_cast<unsigned long long>(retraces_seen),
+                 static_cast<unsigned long long>(steps_allowed),
+                 static_cast<unsigned long long>(steps_held));
+    std::fflush(stderr);
+}

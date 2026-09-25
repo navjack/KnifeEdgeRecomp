@@ -323,6 +323,7 @@ void vi_callback() {
         }
         knife_edge_pipeline_totals();
         knife_edge_guest_waits_totals();
+        knife_edge_rdp_gate_totals();
         std::fflush(nullptr);
         std::_Exit(EXIT_SUCCESS);
     }
@@ -587,6 +588,7 @@ int SDLCALL quit_watch(void*, SDL_Event* event) {
         }
         knife_edge_pipeline_totals();
         knife_edge_guest_waits_totals();
+        knife_edge_rdp_gate_totals();
         std::fflush(nullptr);
         std::_Exit(EXIT_SUCCESS);
     }

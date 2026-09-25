@@ -21,6 +21,9 @@ void knife_edge_guest_poll(uint8_t* rdram, recomp_context* ctx);
 void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
                                 uint32_t site);
 void knife_edge_guest_waits_totals(void);
+void knife_edge_rdp_gate_before(uint8_t* rdram, recomp_context* ctx);
+void knife_edge_rdp_gate_after(uint8_t* rdram, recomp_context* ctx);
+void knife_edge_rdp_gate_totals(void);
 
 #ifdef __cplusplus
 }
