@@ -35,6 +35,7 @@
 #include <utility>
 #include <cstdlib>
 #include <cstdio>
+#include <chrono>
 #include "guest_waits.h"
 #include "pipeline_trace.h"
 
@@ -110,7 +111,24 @@ extern "C" void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
         std::lock_guard<std::mutex> held(sites_lock);
         sites()[site] += 1;
     }
-    ultramodern::wait_for_external_message_timed(rdram, poll_interval_ms);
+    // Sleep only when the loop is really spinning. Deliver whatever is already
+    // queued without waiting, and reserve the timed wait for a site that has
+    // been going round continuously for over 2 ms. A loop that turns hundreds
+    // of times a frame -- a work loop the scanner mistook for a wait -- then
+    // costs microseconds per turn instead of up to a millisecond, which is
+    // what turned one misclassified list walk into a game-wide crawl.
+    using clock = std::chrono::steady_clock;
+    thread_local uint32_t spin_site = 0;
+    thread_local clock::time_point spin_first{};
+    thread_local clock::time_point spin_last{};
+    const clock::time_point now = clock::now();
+    if (site != spin_site || now - spin_last > std::chrono::microseconds{500}) {
+        spin_site = site;
+        spin_first = now;
+    }
+    spin_last = now;
+    const bool spinning = now - spin_first > std::chrono::milliseconds{2};
+    ultramodern::wait_for_external_message_timed(rdram, spinning ? poll_interval_ms : 0);
     ultramodern::check_running_queue(rdram);
 }
 

@@ -1416,3 +1416,55 @@ func = "ovl_12C2F0_func_8017BE84"
 before_vram = 0x8017BF24
 text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BF24);"
 
+# Waits found only by path: a callless route back to the loop head
+# through a range that also holds calls (the gameplay main loop), excluding
+# loops that walk a structure through their own pointer. find_spin_loops.py --hooks.
+[[patches.hook]]
+func = "ovl_1501A0_func_80177068"
+before_vram = 0x80177354
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80177354);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80177068"
+before_vram = 0x80177368
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80177368);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80177378"
+before_vram = 0x80177BC8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80177BC8);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80177378"
+before_vram = 0x80177BDC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80177BDC);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80192C24"
+before_vram = 0x80192C88
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80192C88);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80193B40"
+before_vram = 0x80193DC4
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80193DC4);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8019CE04"
+before_vram = 0x8019CF28
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8019CF28);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8019CE04"
+before_vram = 0x8019CF3C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8019CF3C);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801D97A8"
+before_vram = 0x801D9958
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x801D9958);"
+
+[[patches.hook]]
+func = "ovl_4DC6D0_func_801D3BB0"
+before_vram = 0x801D3C1C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x801D3C1C);"

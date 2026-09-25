@@ -90,6 +90,41 @@ def scan(path, reaching):
     yield from loops(path, function, instructions, reaching)
 
 
+def callless_path(instructions, start, end):
+    """Instructions on paths from `start` to the branch at `end` that pass no
+    call, in address order, or None when every path makes a call."""
+    def succ(i):
+        mnem, ops = instructions[i][1], instructions[i][2]
+        target = re.search(r"\.L([0-9A-Fa-f]{8})", ops)
+        if mnem in ("jal", "jalr", "jr", "j") or mnem.startswith("jal"):
+            return []
+        is_branch = BRANCH.match(mnem.rstrip("l") if mnem != "b" else "b")
+        if not is_branch:
+            return [i + 1]
+        out = [i + 1]  # the delay slot runs either way
+        if target:
+            for j, (vram, _, _) in enumerate(instructions[start:end + 1], start):
+                if vram == int(target.group(1), 16):
+                    out.append(j)
+        return out
+    seen, stack = set(), [start]
+    while stack:
+        i = stack.pop()
+        if i in seen or i < start or i > end + 1:
+            continue
+        if instructions[i][1] in ("jal", "jalr"):
+            continue
+        seen.add(i)
+        if i == end:
+            seen.add(end + 1)  # its delay slot
+            continue
+        # A branch's delay slot is not a successor of its own: step past it.
+        stack.extend(j for j in succ(i) if j != i)
+    if end not in seen:
+        return None
+    return [instructions[i] for i in sorted(seen) if i < len(instructions)]
+
+
 def loops(path, function, instructions, reaching):
     if function is None:
         return
@@ -107,18 +142,28 @@ def loops(path, function, instructions, reaching):
         if start is None:
             continue
         body = instructions[start:index + 2]   # include the delay slot
-        # Any call that can reach an os* function makes the loop safe: the
-        # runtime drains its external queue and reschedules there.
-        if any(m == "jalr" for _, m, _ in body):
-            continue
-        yields = False
-        for _, m, ops in body:
-            if m == "jal":
-                t = re.match(r"func_([0-9A-Fa-f]{8})$", ops.strip())
-                if t is None or int(t.group(1), 16) in reaching:
-                    yields = True
-        if yields:
-            continue
+        # Judge the loop by its paths, not its address range. The gameplay
+        # main loop (ovl_1501A0_func_8019CE04) holds the whole world update --
+        # a dozen calls -- inside `if (mode & 1)`, and when that bit is clear it
+        # is a four-instruction spin on D_8011D1B4 that skips every call. Any
+        # path from the head back to the closing branch that passes no call is
+        # a wait, and only that path's instructions are judged below.
+        path = callless_path(instructions, start, index)
+        if path is None:
+            # Every path makes a call: safe if any call can reach an os*
+            # function, where the runtime drains its queue and reschedules.
+            if any(m == "jalr" for _, m, _ in body):
+                continue
+            yields = False
+            for _, m, ops in body:
+                if m == "jal":
+                    t = re.match(r"func_([0-9A-Fa-f]{8})$", ops.strip())
+                    if t is None or int(t.group(1), 16) in reaching:
+                        yields = True
+            if yields:
+                continue
+        else:
+            body = path
         # A wait re-reads one fixed global until something else changes it, so
         # it is short, it loads through an absolute %lo(D_...) address, and it
         # never stores. Without all three the scan drowns in ordinary work
@@ -164,6 +209,26 @@ def loops(path, function, instructions, reaching):
                and not m.startswith(("sll", "sra", "srl", "slt", "sub", "syscall"))
                and disqualifying(operands)
                for _, m, operands in body):
+            continue
+        # A loop that advances by loading through a register it rewrites is
+        # walking a structure, not waiting: the ROM cache in func_800CD8C0 does
+        # `a3 = a3->next` until null, and hooking it as a wait slept the game
+        # down to a crawl. Loads from the stack, a fixed global, or a register
+        # holding a fixed global's address are the only ones a wait makes.
+        written = set()
+        for _, m, operands in body:
+            dest = re.match(r"\$(\w+),", operands)
+            if dest and not m.startswith(("s", "b", "j")):
+                written.add(dest.group(1))
+        def walks(m, operands):
+            if not m.startswith("l") or m == "lui":
+                return False
+            base = re.search(r"\(\$(\w+)\)$", operands)
+            return (base is not None and base.group(1) != "sp"
+                    and "%lo(" not in operands
+                    and base.group(1) in written
+                    and base.group(1) not in fixed_bases)
+        if any(walks(m, operands) for _, m, operands in body):
             continue
         yield function, vram, target_vram, len(body), sorted(watched)
 
