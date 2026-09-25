@@ -86,6 +86,8 @@ int32_t read_guest_word(uint8_t* rdram, uint32_t vram) {
     return value;
 }
 std::filesystem::path autoboot_rom_path;
+// --launcher keeps the launcher up instead of starting the game.
+bool show_launcher = false;
 
 // A scripted input segment holds its buttons and stick for guest VIs
 // [start_vi, end_vi). Scripts are keyed to guest time so they reproduce
@@ -393,6 +395,9 @@ bool parse_runtime_options(int argc, char** argv) {
             }
             stop_after_vi = static_cast<uint64_t>(value);
         }
+        else if (argument == "--launcher") {
+            show_launcher = true;
+        }
         else if (argument == "--watch") {
             if (!has_value) {
                 std::fprintf(stderr, "--watch requires a guest address\n");
@@ -503,6 +508,29 @@ void register_launcher() {
         options->add_setup_controls_option();
         options->add_settings_option();
         options->add_exit_option();
+    });
+
+    // Skip the launcher once a valid ROM is installed. The frontend shows the
+    // launcher every UI frame until the game starts and never hides it itself --
+    // only its Start Game button does, with start_game followed by
+    // hide_all_contexts. Starting the game any other way leaves the launcher
+    // drawn over it. This runs on the UI thread each frame the launcher is up,
+    // the same thread the button's callback runs on, and does the same thing
+    // once. Without a ROM it does nothing, so the launcher can still load one.
+    // Escape opens the in-game menu for settings and controls.
+    recompui::register_launcher_update_callback([](recompui::LauncherMenu*) {
+        static bool started = false;
+        if (started || show_launcher) {
+            return;
+        }
+        const recomp::GameEntry& game = supported_games[0];
+        if (!recomp::is_rom_valid(game.game_id)) {
+            return;
+        }
+        started = true;
+        recompui::update_game_mod_id(game.mod_game_id);
+        recomp::start_game(game.game_id, {});
+        recompui::hide_all_contexts();
     });
 }
 
@@ -625,7 +653,7 @@ int main(int argc, char** argv) {
     init_config();
     register_launcher();
 
-    // Development shortcut: --rom installs the ROM and boots past the launcher.
+    // --rom installs the ROM; the launcher update above then boots it.
     if (!autoboot_rom_path.empty()) {
         const recomp::RomValidationError result =
             recomp::select_rom(autoboot_rom_path, supported_games[0].game_id);
@@ -633,10 +661,6 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "ROM validation failed (%d)\n", static_cast<int>(result));
             return EXIT_FAILURE;
         }
-        std::thread([]() {
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            recomp::start_game(supported_games[0].game_id, {});
-        }).detach();
     }
 
     recomp::Configuration config{
