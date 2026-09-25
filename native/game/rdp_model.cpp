@@ -72,12 +72,34 @@ constexpr double rsp_clip_work = 300;    // per clipped triangle, beyond the tri
 constexpr double rdp_sync_pipe = 50;
 constexpr double rdp_sync_tile = 33;
 constexpr double rdp_sync_load = 25;
-constexpr double rdp_pixels_per_cycle_fill = 4;  // 64 bits a cycle at 16 bpp
-constexpr double rdp_pixels_per_cycle_copy = 4;
+constexpr double rdp_fill_copy_pipe = 0.25;  // 64 bits a cycle: four 16-bit pixels
 // --- RDP, assumed ---
-constexpr double rdp_bytes_per_cycle = 200e6 / rcp_hz;  // sustained RDRAM share, ~3.2 B/cycle
 constexpr double rdp_tri_setup = 30;     // edge-walker setup per triangle
-constexpr double rdp_span = 4;           // per scanline span
+
+// --- RDP, fitted to real-hardware footage (see pipeline_trace.cpp) ---
+// The RDP is bound by RDRAM far more than by its pipeline: every pixel it
+// touches is colour (and often Z) read and written, and every texture load is
+// read. So each pixel costs its pipeline rate or its memory traffic at an
+// effective bandwidth, whichever is slower, and each scanline span a fixed
+// overhead. KNIFE_EDGE_MODEL_BW (bytes per RCP cycle) and KNIFE_EDGE_MODEL_SPAN
+// (cycles) override the fitted values for experiments.
+double env_or(const char* name, double fallback) {
+    const char* text = std::getenv(name);
+    return text != nullptr ? std::atof(text) : fallback;
+}
+const double rdp_raw_bytes_per_cycle = env_or("KNIFE_EDGE_MODEL_BW", 1.47);
+const double rdp_span = env_or("KNIFE_EDGE_MODEL_SPAN", 36);
+
+// The VI scans the framebuffer out of the same RDRAM 60 times a second, and
+// what it takes the RDP does not get: 320x240 at 16 bits is 0.15 bytes per RCP
+// cycle, 640x480 (the title screen) 0.59. Reading only one field's lines at
+// 640x480 (0.29) fits the footage worse (title 15% fast instead of 2% slow).
+double rdp_bytes_per_cycle_at(uint32_t width, uint32_t pixel_size) {
+    const double bytes = pixel_size == 3 ? 4.0 : 2.0;
+    const double height = width * 3.0 / 4.0;
+    const double scanout = width * height * bytes * 60.0 / rcp_hz;
+    return std::max(0.1, rdp_raw_bytes_per_cycle - scanout);
+}
 
 struct Matrix {
     std::array<float, 16> m{};
@@ -167,8 +189,14 @@ double polygon_area(const std::vector<Point>& poly) {
 }
 
 FrameCounts last_counts;
+bool trace_this_frame = false;
 
 }  // namespace
+
+// KNIFE_EDGE_MODEL_TRACE: print the rectangles and mode changes of one frame.
+extern "C" void knife_edge_model_trace_next(int enable) {
+    trace_this_frame = enable != 0;
+}
 
 extern "C" const FrameCounts* knife_edge_last_frame_counts(void) {
     return &last_counts;
@@ -192,52 +220,55 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
     uint32_t othermode_l = 0;  // Z_CMP 0x10, Z_UPD 0x20, IM_RD 0x40
     uint32_t image_size = 2;   // G_SETTIMG texel size: 0 4b, 1 8b, 2 16b, 3 32b
     uint32_t color_size = 2;   // G_SETCIMG pixel size
+    double rdp_bytes_per_cycle = rdp_bytes_per_cycle_at(320, 2);
+    bool framebuffer_seen = false;
+    // Scissor, in pixels: G_SETSCISSOR sets it. The title screen draws at
+    // 640x480, so the screen size must come from the list, not a constant.
+    double scissor_left = 0, scissor_top = 0, scissor_right = 320, scissor_bottom = 240;
 
     double rsp = 0, rdp = 0;
     uint32_t pc = display_list & 0x00FFFFFFu;
     const auto resolve = [&](uint32_t address) {
         return (segment[(address >> 24) & 0xF] + (address & 0x00FFFFFFu)) & 0x00FFFFFFu;
     };
-    // Cycles for one pixel of a triangle or rectangle in the current mode: the
-    // pipeline rate, or the memory traffic at sustained bandwidth if slower.
-    const auto pixel_cycles = [&](bool rectangle) {
-        if (cycle_type == 3) {
-            return 1.0 / rdp_pixels_per_cycle_fill;
-        }
-        if (cycle_type == 2) {
-            return 1.0 / rdp_pixels_per_cycle_copy;
-        }
-        const double pipe = cycle_type == 1 ? 2.0 : 1.0;
-        const double pixel_bytes = color_size == 3 ? 4.0 : 2.0;
-        double bytes = pixel_bytes;                          // colour write
-        if (othermode_l & 0x40) bytes += pixel_bytes;        // IM_RD: colour read
-        if (!rectangle && (othermode_l & 0x10)) bytes += 2;  // Z read
-        if (!rectangle && (othermode_l & 0x20)) bytes += 2;  // Z write
-        return std::max(pipe, bytes / rdp_bytes_per_cycle);
-    };
+    // One batch of pixels in the current mode: its pipeline cycles and its
+    // RDRAM bytes, costed at whichever is slower.
     const auto count_pixels = [&](double area, bool rectangle) {
-        if (cycle_type == 3) n.px_fill += area;
-        else if (cycle_type == 2) n.px_copy += area;
-        else if (!rectangle && (othermode_l & 0x30)) (cycle_type == 1 ? n.px_2c_z : n.px_1c_z) += area;
-        else (cycle_type == 1 ? n.px_2c : n.px_1c) += area;
-        rdp += area * pixel_cycles(rectangle);
+        const double pixel_bytes = color_size == 3 ? 4.0 : 2.0;
+        double pipe, bytes;
+        if (cycle_type >= 2) {  // copy and fill: write only, 64 bits a cycle
+            pipe = rdp_fill_copy_pipe;
+            bytes = pixel_bytes;
+            (cycle_type == 3 ? n.px_fill : n.px_copy) += area;
+        } else {
+            pipe = cycle_type == 1 ? 2.0 : 1.0;
+            bytes = pixel_bytes;                                 // colour write
+            if (othermode_l & 0x40) bytes += pixel_bytes;        // IM_RD: colour read
+            if (!rectangle && (othermode_l & 0x10)) bytes += 2;  // Z read
+            if (!rectangle && (othermode_l & 0x20)) bytes += 2;  // Z write
+            if (!rectangle && (othermode_l & 0x30)) (cycle_type == 1 ? n.px_2c_z : n.px_1c_z) += area;
+            else (cycle_type == 1 ? n.px_2c : n.px_1c) += area;
+        }
+        n.pipe_cycles += area * pipe;
+        n.pixel_bytes += area * bytes;
+        rdp += area * std::max(pipe, bytes / rdp_bytes_per_cycle);
     };
 
     // Rasterize a screen-space polygon (already on the near side of the eye).
     const auto rasterize = [&](std::vector<Point> screen) {
-        const double w = 320, h = 240;
-        screen = clip_edge(screen, [](const Point& p) { return p.x >= 0; },
-                           [](const Point& a, const Point& b) { double t = (0 - a.x) / (b.x - a.x); return Point{0, a.y + (b.y - a.y) * t}; });
-        screen = clip_edge(screen, [&](const Point& p) { return p.x <= w; },
-                           [&](const Point& a, const Point& b) { double t = (w - a.x) / (b.x - a.x); return Point{w, a.y + (b.y - a.y) * t}; });
-        screen = clip_edge(screen, [](const Point& p) { return p.y >= 0; },
-                           [](const Point& a, const Point& b) { double t = (0 - a.y) / (b.y - a.y); return Point{a.x + (b.x - a.x) * t, 0}; });
-        screen = clip_edge(screen, [&](const Point& p) { return p.y <= h; },
-                           [&](const Point& a, const Point& b) { double t = (h - a.y) / (b.y - a.y); return Point{a.x + (b.x - a.x) * t, h}; });
+        const double x0 = scissor_left, y0 = scissor_top, x1 = scissor_right, y1 = scissor_bottom;
+        screen = clip_edge(screen, [&](const Point& p) { return p.x >= x0; },
+                           [&](const Point& a, const Point& b) { double t = (x0 - a.x) / (b.x - a.x); return Point{x0, a.y + (b.y - a.y) * t}; });
+        screen = clip_edge(screen, [&](const Point& p) { return p.x <= x1; },
+                           [&](const Point& a, const Point& b) { double t = (x1 - a.x) / (b.x - a.x); return Point{x1, a.y + (b.y - a.y) * t}; });
+        screen = clip_edge(screen, [&](const Point& p) { return p.y >= y0; },
+                           [&](const Point& a, const Point& b) { double t = (y0 - a.y) / (b.y - a.y); return Point{a.x + (b.x - a.x) * t, y0}; });
+        screen = clip_edge(screen, [&](const Point& p) { return p.y <= y1; },
+                           [&](const Point& a, const Point& b) { double t = (y1 - a.y) / (b.y - a.y); return Point{a.x + (b.x - a.x) * t, y1}; });
         if (screen.size() < 3) {
             return;  // scissored away
         }
-        double top = h, bottom = 0;
+        double top = y1, bottom = y0;
         for (const Point& p : screen) {
             top = std::min(top, p.y);
             bottom = std::max(bottom, p.y);
@@ -467,21 +498,38 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
                 break;
             case 0xE7:  // G_RDPPIPESYNC
                 n.syncs++;
+                n.sync_cycles += rdp_sync_pipe;
                 rdp += rdp_sync_pipe;
                 break;
             case 0xE8:  // G_RDPTILESYNC
                 n.syncs++;
+                n.sync_cycles += rdp_sync_tile;
                 rdp += rdp_sync_tile;
                 break;
             case 0xE6:  // G_RDPLOADSYNC
                 n.syncs++;
+                n.sync_cycles += rdp_sync_load;
                 rdp += rdp_sync_load;
+                break;
+            case 0xED:  // G_SETSCISSOR: 10.2 fixed-point corners
+                scissor_left = ((w0 >> 12) & 0xFFF) / 4.0;
+                scissor_top = (w0 & 0xFFF) / 4.0;
+                scissor_right = ((w1 >> 12) & 0xFFF) / 4.0;
+                scissor_bottom = (w1 & 0xFFF) / 4.0;
                 break;
             case 0xFD:  // G_SETTIMG
                 image_size = (w0 >> 19) & 3;
                 break;
             case 0xFF:  // G_SETCIMG
                 color_size = (w0 >> 19) & 3;
+                if (!framebuffer_seen) {  // the first image set is the frame's own
+                    rdp_bytes_per_cycle = rdp_bytes_per_cycle_at((w0 & 0xFFF) + 1, color_size);
+                    framebuffer_seen = true;
+                }
+                if (trace_this_frame) {
+                    std::fprintf(stderr, "[model-trace] setcimg size %u width %u addr %08X\n", color_size,
+                                 (w0 & 0xFFF) + 1, w1);
+                }
                 break;
             case 0xF3: {  // G_LOADBLOCK: lrs is the texel count minus one
                 const double texels = ((w1 >> 12) & 0xFFF) + 1;
@@ -508,6 +556,10 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
             case 0xF6: {  // G_FILLRECT, 10.2 fixed point, inclusive in fill and copy mode
                 const double lrx = ((w0 >> 12) & 0xFFF) / 4.0, lry = (w0 & 0xFFF) / 4.0;
                 const double ulx = ((w1 >> 12) & 0xFFF) / 4.0, uly = (w1 & 0xFFF) / 4.0;
+                if (trace_this_frame) {
+                    std::fprintf(stderr, "[model-trace] fillrect %.0f,%.0f-%.0f,%.0f cycle %u othermode_l %08X color_size %u\n",
+                                 ulx, uly, lrx, lry, cycle_type, othermode_l, color_size);
+                }
                 const double inclusive = cycle_type >= 2 ? 1 : 0;
                 const double rows = std::max(0.0, lry - uly + inclusive);
                 n.spans += rows;
@@ -518,6 +570,10 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
             case 0xE4: {  // G_TEXRECT, followed by two RDPHALF words
                 const double lrx = ((w0 >> 12) & 0xFFF) / 4.0, lry = (w0 & 0xFFF) / 4.0;
                 const double ulx = ((w1 >> 12) & 0xFFF) / 4.0, uly = (w1 & 0xFFF) / 4.0;
+                if (trace_this_frame) {
+                    std::fprintf(stderr, "[model-trace] texrect %.0f,%.0f-%.0f,%.0f cycle %u othermode_l %08X\n",
+                                 ulx, uly, lrx, lry, cycle_type, othermode_l);
+                }
                 const double inclusive = cycle_type >= 2 ? 1 : 0;
                 const double rows = std::max(0.0, lry - uly + inclusive);
                 n.spans += rows;
@@ -555,6 +611,7 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
     n.rsp_ms = rsp / rcp_hz * 1000.0;
     n.rdp_ms = rdp / rcp_hz * 1000.0;
     last_counts = n;
+    trace_this_frame = false;
     // The microcode feeds the RDP through a FIFO, so the two overlap and the
     // task takes about as long as the slower of them.
     return std::max(n.rsp_ms, n.rdp_ms);

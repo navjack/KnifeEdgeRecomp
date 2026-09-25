@@ -13,6 +13,7 @@ typedef struct FrameCounts {
     double tris_drawn, tris_backface, tris_offscreen, tris_clipped, tris_degenerate;
     double px_1c, px_1c_z, px_2c, px_2c_z, px_fill, px_copy;  // by cycle type, with/without Z
     double spans, texture_bytes;
+    double pipe_cycles, pixel_bytes, sync_cycles;  // for fitting the RDP's bandwidth offline
     double rsp_ms, rdp_ms;
 } FrameCounts;
 

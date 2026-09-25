@@ -248,27 +248,26 @@ extern "C" void knife_edge_rdp_gate_before(uint8_t* rdram, recomp_context* ctx) 
     (void)ctx;
     retraces_seen++;
     forced_busy = false;
-    const int needed = frame_retraces > 0 ? frame_retraces : rdp_retraces();
-    if (needed <= 1 && frame_retraces == 0 && rdp_retraces() <= 1) {
-        return;
-    }
     const gpr counter = static_cast<gpr>(static_cast<int32_t>(pending_gfx_tasks_vram));
     if (MEM_W(0, counter) != 0) {
         return;  // really still drawing: the game skips on its own
     }
-    if (retraces_seen - last_drawn < static_cast<uint64_t>(needed)) {
+    const int needed = frame_retraces > 0 ? frame_retraces : rdp_retraces();
+    if (needed > 1 && retraces_seen - last_drawn < static_cast<uint64_t>(needed)) {
         MEM_W(0, counter) = 1;
         forced_busy = true;
         steps_held++;
-    } else {
-        last_drawn = retraces_seen;
-        steps_allowed++;
-        step_started = std::chrono::steady_clock::now();
-        step_instructions = &knife_edge_thread_instructions;
-        step_idle = &thread_idle_instructions;
-        step_started_work = *step_instructions - *step_idle;
-        step_running = true;
+        return;
     }
+    // The game steps on this retrace. Recorded whatever the pacing, so the
+    // model's per-step CPU and host time stay per step even when uncapped.
+    last_drawn = retraces_seen;
+    steps_allowed++;
+    step_started = std::chrono::steady_clock::now();
+    step_instructions = &knife_edge_thread_instructions;
+    step_idle = &thread_idle_instructions;
+    step_started_work = *step_instructions - *step_idle;
+    step_running = true;
 }
 
 // Straight after the callback returns: put the real count back.

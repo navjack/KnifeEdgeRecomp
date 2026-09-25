@@ -168,7 +168,12 @@ void poll_input() {
 
     const uint64_t vi = vi_count.load(std::memory_order_relaxed);
     ScriptedInput next;
-    for (const InputScriptSegment& segment : input_script) {
+    // KNIFE_EDGE_SCRIPT_UNTIL_LEVEL: stop scripted input once a level starts,
+    // so a script can mash through menus of any pacing without skipping the
+    // level's opening transmission.
+    static const bool until_level = std::getenv("KNIFE_EDGE_SCRIPT_UNTIL_LEVEL") != nullptr;
+    const bool stopped = until_level && knife_edge_level_callback_installed.load();
+    for (const InputScriptSegment& segment : stopped ? std::vector<InputScriptSegment>{} : input_script) {
         if (vi >= segment.start_vi && vi < segment.end_vi) {
             next.buttons |= segment.buttons;
             if (segment.stick_x != 0.0f) next.stick_x = segment.stick_x;

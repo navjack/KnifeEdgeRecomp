@@ -30,6 +30,7 @@
 #include "rdp_model.h"
 
 extern "C" void knife_edge_dma_take(uint64_t* step_bytes, uint64_t* other_bytes);
+extern "C" void knife_edge_model_trace_next(int enable);
 #include "recomp.h"
 
 namespace {
@@ -313,16 +314,11 @@ void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
         // took, if longer: the transmission box waits on the clock, and that
         // wait is real on hardware too.
         //
-        // Two costs are fitted to a real-hardware longplay rather than taken
-        // from documents: the CPU's cycles per instruction (5.5 -- the VR4300
-        // stalls on every cache miss to RDRAM) and a factor on the RDP's
-        // estimate (2.7 -- it reaches about a third of its peak fill rate).
-        // Stage 1 between its two transmissions is 4,404 steps on the rail
-        // (deterministic, identical in every run); the footage shows 4,399
-        // distinct frames over 160.2 s of unpaused play, 27.5 steps a second,
-        // 2.00 to 2.60 retraces a step window by window. These two values
-        // reproduce that at 0.12 retraces a step RMS over 14 windows of 300
-        // steps. KNIFE_EDGE_MODEL_CPI and KNIFE_EDGE_MODEL_RDP override them.
+        // Three costs are fitted to a real-hardware longplay rather than taken
+        // from documents: the CPU's cycles per instruction (the VR4300 stalls
+        // on every cache miss to RDRAM), and in rdp_model.cpp the RDP's
+        // effective memory bandwidth and per-span overhead. The fit and its
+        // data are in docs/PACING.md. KNIFE_EDGE_MODEL_CPI overrides the CPI.
         static const bool model = [] {
             const char* setting = std::getenv("KNIFE_EDGE_RDP_MODEL");
             if (setting != nullptr) {
@@ -330,19 +326,28 @@ void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
             }
             return std::getenv("KNIFE_EDGE_RDP_VIS") == nullptr;
         }();
+        // KNIFE_EDGE_RDP_MODEL=measure: estimate and record, but leave the
+        // pacing to KNIFE_EDGE_RDP_VIS -- recording runs at any speed.
+        static const bool measure_only = [] {
+            const char* setting = std::getenv("KNIFE_EDGE_RDP_MODEL");
+            return setting != nullptr && std::string(setting) == "measure";
+        }();
         knife_edge_step_submitted();
         if (model) {
             static const double cpi = [] {
                 const char* text = std::getenv("KNIFE_EDGE_MODEL_CPI");
-                return text != nullptr ? std::atof(text) : 5.5;
+                return text != nullptr ? std::atof(text) : 4.5;
             }();
-            static const double rdp_factor = [] {
-                const char* text = std::getenv("KNIFE_EDGE_MODEL_RDP");
-                return text != nullptr ? std::atof(text) : 2.7;
+            static const long long trace_at = [] {
+                const char* text = std::getenv("KNIFE_EDGE_MODEL_TRACE");
+                return text != nullptr ? std::atoll(text) : -1LL;
             }();
+            if (gfx_task == trace_at) {
+                knife_edge_model_trace_next(1);
+            }
             knife_edge_estimate_frame_ms(rdram, static_cast<uint32_t>(data_ptr));
             const FrameCounts& counts = *knife_edge_last_frame_counts();
-            const double draw_ms = std::max(counts.rsp_ms, counts.rdp_ms * rdp_factor);
+            const double draw_ms = std::max(counts.rsp_ms, counts.rdp_ms);
             const uint64_t own_work = knife_edge_step_work_so_far();
             const double cpu_ms = static_cast<double>(own_work) * cpi / 93750.0;
             const double host_ms = knife_edge_ms_since_step_start();
@@ -359,11 +364,13 @@ void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
             const double dma_ms = static_cast<double>(dma_step) / pi_bytes_per_ms;
             const double frame_ms = std::max(cpu_ms + dma_ms, host_ms) + draw_ms;
             const int retraces = std::max(1, static_cast<int>(std::ceil(frame_ms / (1000.0 / 60.0))));
-            knife_edge_rdp_set_frame_retraces(retraces);
+            if (!measure_only) {
+                knife_edge_rdp_set_frame_retraces(retraces);
+            }
             const FrameCounts& n = *knife_edge_last_frame_counts();
             {
                 std::lock_guard<std::mutex> held(step_costs_lock);
-                frame_estimates().push_back({n.rsp_ms, n.rdp_ms * rdp_factor, cpu_ms + dma_ms, host_ms, retraces});
+                frame_estimates().push_back({n.rsp_ms, n.rdp_ms, cpu_ms + dma_ms, host_ms, retraces});
             }
             // KNIFE_EDGE_RDP_MODEL_CSV=<file>: the raw counts, one row a frame,
             // so the model's assumed costs can be varied without a rebuild.
@@ -374,19 +381,20 @@ void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
                     std::fprintf(file, "gfx,step_instructions,host_ms,commands,rdp_commands,matrices,syncs,vertices,"
                                        "vertices_lit,light_xfrms,tris_drawn,tris_backface,tris_offscreen,tris_clipped,"
                                        "tris_degenerate,px_1c,px_1c_z,px_2c,px_2c_z,px_fill,px_copy,spans,texture_bytes,"
-                                       "rsp_ms,rdp_ms,cpu_ms,dma_step_bytes,dma_other_bytes,retraces\n");
+                                       "rsp_ms,rdp_ms,cpu_ms,dma_step_bytes,dma_other_bytes,retraces,pipe_cycles,pixel_bytes,sync_cycles\n");
                 }
                 return file;
             }();
             if (csv != nullptr) {
                 std::fprintf(csv, "%lld,%llu,%.2f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,"
-                                  "%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.3f,%.3f,%.3f,%llu,%llu,%d\n",
+                                  "%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.3f,%.3f,%.3f,%llu,%llu,%d,%.0f,%.0f,%.0f\n",
                              gfx_task, static_cast<unsigned long long>(own_work), host_ms, n.commands, n.rdp_commands,
                              n.matrices, n.syncs, n.vertices, n.vertices_lit, n.light_xfrms, n.tris_drawn,
                              n.tris_backface, n.tris_offscreen, n.tris_clipped, n.tris_degenerate, n.px_1c, n.px_1c_z,
                              n.px_2c, n.px_2c_z, n.px_fill, n.px_copy, n.spans, n.texture_bytes, n.rsp_ms, n.rdp_ms,
                              cpu_ms, static_cast<unsigned long long>(dma_step),
-                             static_cast<unsigned long long>(dma_other), retraces);
+                             static_cast<unsigned long long>(dma_other), retraces, n.pipe_cycles, n.pixel_bytes,
+                             n.sync_cycles);
             }
         }
     }
@@ -817,12 +825,19 @@ extern "C" void knife_edge_cpu_cost_totals(void) {
     std::fflush(stderr);
 }
 
+// Set once the gameplay frame callback (ovl_1501A0_func_8019CF84) is installed:
+// a level has started. The input script can stop there (main.cpp).
+std::atomic<bool> knife_edge_level_callback_installed{false};
+
 // KNIFE_EDGE_COMM_LOG=1: the in-flight transmission and its sounds. At the
 // sound call func_800C8544(id) and at each tick of the dialogue state machine
 // (ovl_1501A0_func_8019743C), log wall-clock ms, the graphics task, and the
 // dialogue's state (0 idle, 1 opening, 2 typing, 3 closing), script offset,
 // current code, pause counter and speaker. Ticks log only on a change.
 extern "C" void knife_edge_comm_probe(uint8_t* rdram, recomp_context* ctx, uint32_t site) {
+    if (site == 0x800D1640u && static_cast<uint32_t>(ctx->r4) == 0x8019CF84u) {
+        knife_edge_level_callback_installed.store(true);  // gameplay's frame callback
+    }
     static const bool enabled = std::getenv("KNIFE_EDGE_COMM_LOG") != nullptr;
     if (!enabled) {
         return;

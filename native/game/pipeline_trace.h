@@ -40,6 +40,8 @@ void knife_edge_pipeline_stalled(int32_t pending, int seconds);
 
 #ifdef __cplusplus
 }
+#include <atomic>
+extern std::atomic<bool> knife_edge_level_callback_installed;
 #endif
 
 #endif /* KNIFE_EDGE_PIPELINE_TRACE_H */
