@@ -87,3 +87,10 @@ bind 0x800DAF00 osContStartReadData
 # posts to that thread. osEPiStartDma touches no hardware register itself, so
 # nothing about its body says it depends on something that no longer exists.
 bind 0x800D8A00 osEPiStartDma
+# The clock pair. osGetCount (mfc0 $v0, $9) recompiled reads cop0_regs[9], which
+# nothing ever writes, so it returns 0 forever. osSetTime recompiled writes the
+# game's own 0x8016A890, which the bound osGetTime never reads, so its reset has
+# no effect. Both sit in the same N64Recomp lists as the already-bound
+# osGetTime, and the runtime implements both. world-tour hit the frozen clock.
+bind 0x800E0B50 osGetCount
+bind 0x800D7A20 osSetTime

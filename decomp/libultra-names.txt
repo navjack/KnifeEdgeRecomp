@@ -13,6 +13,7 @@
 0x800D76A0 osCreateThread
 0x800D77F0 osStartThread
 0x800D7940 osSetThreadPri
+0x800D7A20 osSetTime
 0x800D8900 osCartRomInit
 0x800D8A00 osEPiStartDma
 0x800D8B80 osCreateMesgQueue
@@ -42,6 +43,7 @@
 0x800DC200 osWritebackDCache
 0x800DD800 osJamMesg
 0x800E0180 osEPiRawStartDma
+0x800E0B50 osGetCount
 0x800E0B80 __osSpSetPc
 0x800E0C80 osGetTime
 0x800E0D10 osSetTimer
