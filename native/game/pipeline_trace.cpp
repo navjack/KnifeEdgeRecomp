@@ -13,6 +13,7 @@
 // hits -- the interesting question is whether a step happens at all, and an
 // unbounded log of a 60 Hz pipeline drowns it.
 #include <atomic>
+#include <chrono>
 #include <algorithm>
 #include <execinfo.h>
 #include <cstring>
@@ -26,6 +27,7 @@
 #include <cstdlib>
 
 #include "cpu_cost.h"
+#include "rdp_model.h"
 #include "recomp.h"
 
 namespace {
@@ -142,6 +144,17 @@ std::atomic<int> gfx_tasks_started{0};
 // Every graphics task started, tracing or not: the hang watchdog's heartbeat.
 std::atomic<long long> gfx_tasks_total{0};
 
+struct FrameEstimate {
+    double draw_ms;
+    double cpu_ms;
+    int retraces;
+    double culled;
+};
+std::vector<FrameEstimate>& frame_estimates() {
+    static std::vector<FrameEstimate> all;
+    return all;
+}
+
 // Guest instructions of real work per game step, one entry per graphics task.
 std::mutex step_costs_lock;
 std::vector<uint64_t>& step_costs() {
@@ -250,16 +263,58 @@ void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
     const int32_t type = MEM_W(0x0, ctx->r4);
     const int32_t data_ptr = MEM_W(0x30, ctx->r4);
     if (type == 1) {
-        gfx_tasks_total.fetch_add(1, std::memory_order_relaxed);
+        const long long gfx_task = gfx_tasks_total.fetch_add(1, std::memory_order_relaxed) + 1;
+        // KNIFE_EDGE_DUMP_RDRAM=<dir>:<n>[,<n>...]: write all 8 MB of RDRAM,
+        // byte-swapped to guest order, to <dir>/rdram-<n>.bin as graphics task
+        // n starts. For finding game state by content.
+        static const auto dumps = [] {
+            std::pair<std::string, std::vector<long long>> out;
+            if (const char* spec = std::getenv("KNIFE_EDGE_DUMP_RDRAM")) {
+                std::string text = spec;
+                const size_t colon = text.rfind(':');
+                out.first = text.substr(0, colon);
+                for (size_t at = colon + 1; at < text.size();) {
+                    size_t next = text.find(',', at);
+                    out.second.push_back(std::atoll(text.substr(at, next - at).c_str()));
+                    at = next == std::string::npos ? text.size() : next + 1;
+                }
+            }
+            return out;
+        }();
+        if (std::find(dumps.second.begin(), dumps.second.end(), gfx_task) != dumps.second.end()) {
+            const std::string path = dumps.first + "/rdram-" + std::to_string(gfx_task) + ".bin";
+            if (FILE* out = std::fopen(path.c_str(), "wb")) {
+                std::vector<uint8_t> guest(0x800000);
+                for (size_t i = 0; i < guest.size(); i++) {
+                    guest[i] = rdram[i ^ 3];
+                }
+                std::fwrite(guest.data(), 1, guest.size(), out);
+                std::fclose(out);
+            }
+        }
         // Guest work (all threads, minus spinning) since the previous
         // graphics task: what one game step cost the CPU.
         static uint64_t last_work = 0;
         const uint64_t work = knife_edge_guest_instructions - knife_edge_idle_instructions;
+        const uint64_t step_work = last_work != 0 ? work - last_work : 0;
         if (last_work != 0) {
             std::lock_guard<std::mutex> held(step_costs_lock);
-            step_costs().push_back(work - last_work);
+            step_costs().push_back(step_work);
         }
         last_work = work;
+        // KNIFE_EDGE_RDP_MODEL=1: pace each frame by what a real N64 would have
+        // needed to draw it, or by the step's CPU work if that is slower (a CPI
+        // of 1.5 at 93.75 MHz; the pipeline overlaps the two, so the slower wins).
+        static const bool model = std::getenv("KNIFE_EDGE_RDP_MODEL") != nullptr;
+        if (model) {
+            const double draw_ms = knife_edge_estimate_frame_ms(rdram, static_cast<uint32_t>(data_ptr));
+            const double cpu_ms = static_cast<double>(step_work) * 1.5 / 93750.0;
+            const double frame_ms = std::max(draw_ms, cpu_ms);
+            const int retraces = std::max(1, static_cast<int>(std::ceil(frame_ms / (1000.0 / 60.0))));
+            knife_edge_rdp_set_frame_retraces(retraces);
+            std::lock_guard<std::mutex> held(step_costs_lock);
+            frame_estimates().push_back({draw_ms, cpu_ms, retraces, knife_edge_last_culled_fraction()});
+        }
     }
     if (type == 1 && !dump_indices().empty()) {
         const int index = gfx_tasks_started.fetch_add(1);
@@ -658,8 +713,58 @@ extern "C" void knife_edge_cpu_cost_totals(void) {
     }
     std::sort(tail.begin(), tail.end());
     const auto tail_at = [&](double q) { return tail[static_cast<size_t>(q * (tail.size() - 1))]; };
+    if (!frame_estimates().empty()) {
+        std::vector<double> draw, cpu, culled;
+        int histogram[5] = {};
+        for (const FrameEstimate& e : frame_estimates()) {
+            draw.push_back(e.draw_ms);
+            cpu.push_back(e.cpu_ms);
+            culled.push_back(e.culled);
+            histogram[std::min(e.retraces, 4)]++;
+        }
+        std::sort(draw.begin(), draw.end());
+        std::sort(cpu.begin(), cpu.end());
+        const auto q = [](const std::vector<double>& v, double f) { return v[static_cast<size_t>(f * (v.size() - 1))]; };
+        std::fprintf(stderr, "[model] %zu frames: draw ms median %.1f p90 %.1f max %.1f; cpu ms median %.1f p90 %.1f; "
+                     "retraces per frame 1:%d 2:%d 3:%d 4+:%d; culled median %.0f%%\n", draw.size(), q(draw, 0.5), q(draw, 0.9),
+                     draw.back(), q(cpu, 0.5), q(cpu, 0.9), histogram[1], histogram[2], histogram[3], histogram[4],
+                     [&] { std::sort(culled.begin(), culled.end()); return q(culled, 0.5) * 100; }());
+    }
     std::fprintf(stderr, "[cpu] last %zu steps: median %llu, p90 %llu, p99 %llu, max %llu\n", tail.size(),
                  (unsigned long long)tail_at(0.5), (unsigned long long)tail_at(0.9),
                  (unsigned long long)tail_at(0.99), (unsigned long long)tail.back());
     std::fflush(stderr);
+}
+
+// KNIFE_EDGE_COMM_LOG=1: the in-flight transmission and its sounds. At the
+// sound call func_800C8544(id) and at each tick of the dialogue state machine
+// (ovl_1501A0_func_8019743C), log wall-clock ms, the graphics task, and the
+// dialogue's state (0 idle, 1 opening, 2 typing, 3 closing), script offset,
+// current code, pause counter and speaker. Ticks log only on a change.
+extern "C" void knife_edge_comm_probe(uint8_t* rdram, recomp_context* ctx, uint32_t site) {
+    static const bool enabled = std::getenv("KNIFE_EDGE_COMM_LOG") != nullptr;
+    if (!enabled) {
+        return;
+    }
+    const double wall_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto global = [&](uint32_t address) {
+        return static_cast<uint32_t>(MEM_W(0, static_cast<gpr>(static_cast<int32_t>(address))));
+    };
+    const uint32_t state = global(0x8011D298), offset = global(0x8011D2AC), code = global(0x8011D2B0);
+    const uint32_t pause = global(0x8011D2B8), speaker = global(0x8011D2C4);
+    if (site == 0x800C8544u) {
+        std::fprintf(stderr, "[comm] %.3f gfx %lld sound 0x%X ra 0x%08X | state %u offset 0x%X\n", wall_ms,
+                     gfx_tasks_total.load(), static_cast<uint32_t>(ctx->r4), static_cast<uint32_t>(ctx->r31),
+                     state, offset);
+        return;
+    }
+    static uint32_t last[5] = {~0u, ~0u, ~0u, ~0u, ~0u};
+    const uint32_t now[5] = {state, offset, code, pause, speaker};
+    if (std::equal(now, now + 5, last)) {
+        return;
+    }
+    std::copy(now, now + 5, last);
+    std::fprintf(stderr, "[comm] %.3f gfx %lld tick state %u offset 0x%X code 0x%04X pause %u speaker %u\n",
+                 wall_ms, gfx_tasks_total.load(), state, offset, code, pause, speaker);
 }

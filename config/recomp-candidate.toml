@@ -1468,3 +1468,15 @@ text = "knife_edge_guest_poll_site(rdram, ctx, 0x801D9958);"
 func = "ovl_4DC6D0_func_801D3BB0"
 before_vram = 0x801D3C1C
 text = "knife_edge_guest_poll_site(rdram, ctx, 0x801D3C1C);"
+
+[[patches.hook]]
+# Sound call func_800C8544(id): timing of the transmission static (KNIFE_EDGE_COMM_LOG).
+func = "func_800C8544"
+before_vram = 0x800C8544
+text = "knife_edge_comm_probe(rdram, ctx, 0x800C8544);"
+
+[[patches.hook]]
+# Dialogue state machine tick, once per game step while a transmission runs.
+func = "ovl_1501A0_func_8019743C"
+before_vram = 0x8019743C
+text = "knife_edge_comm_probe(rdram, ctx, 0x8019743C);"

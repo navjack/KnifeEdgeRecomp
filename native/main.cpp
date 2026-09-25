@@ -249,6 +249,30 @@ void queue_samples(int16_t* samples, size_t sample_count) {
     }
     audio_buffers_queued.fetch_add(1, std::memory_order_relaxed);
     audio_nonzero_samples_queued.fetch_add(nonzero_samples, std::memory_order_relaxed);
+
+    // KNIFE_EDGE_AUDIO_LOG=<file>: one line per guest buffer -- host ms, the
+    // guest sample position it starts at, its length, how much output was
+    // already queued ahead of it (its latency), and the game step it was made
+    // during. With KNIFE_EDGE_DUMP_AUDIO this ties every sound to a step.
+    static FILE* audio_log = [] {
+        const char* path = std::getenv("KNIFE_EDGE_AUDIO_LOG");
+        FILE* file = path != nullptr ? std::fopen(path, "w") : nullptr;
+        if (file != nullptr) {  // wall clock at host ms 0, to line up with screen captures
+            std::fprintf(file, "# epoch_ms %.3f\n", std::chrono::duration<double, std::milli>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        }
+        return file;
+    }();
+    if (audio_log != nullptr) {
+        static const auto start = std::chrono::steady_clock::now();
+        static uint64_t position = 0;
+        const double now_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        const double queued_ms = SDL_GetQueuedAudioSize(audio_device) / (2.0 * sizeof(int16_t)) * 1000.0 /
+                                 static_cast<double>(audio_device_frequency);
+        std::fprintf(audio_log, "%.2f %llu %zu %.2f %lld\n", now_ms, static_cast<unsigned long long>(position),
+                     sample_count / 2, queued_ms, knife_edge_gfx_tasks_total());
+        position += sample_count / 2;
+    }
 }
 
 size_t get_frames_remaining() {

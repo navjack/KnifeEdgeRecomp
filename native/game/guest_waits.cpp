@@ -38,6 +38,7 @@
 #include <chrono>
 #include "guest_waits.h"
 #include "cpu_cost.h"
+#include "rdp_model.h"
 #include "pipeline_trace.h"
 
 namespace {
@@ -199,6 +200,8 @@ int rdp_retraces() {
 }
 
 uint64_t retraces_seen = 0;
+// From the per-frame model (rdp_model.cpp): retraces the last frame needed.
+int frame_retraces = 0;
 uint64_t last_drawn = 0;
 bool forced_busy = false;
 uint64_t steps_allowed = 0;
@@ -213,14 +216,15 @@ extern "C" void knife_edge_rdp_gate_before(uint8_t* rdram, recomp_context* ctx) 
     (void)ctx;
     retraces_seen++;
     forced_busy = false;
-    if (rdp_retraces() <= 1) {
+    const int needed = frame_retraces > 0 ? frame_retraces : rdp_retraces();
+    if (needed <= 1 && frame_retraces == 0 && rdp_retraces() <= 1) {
         return;
     }
     const gpr counter = static_cast<gpr>(static_cast<int32_t>(pending_gfx_tasks_vram));
     if (MEM_W(0, counter) != 0) {
         return;  // really still drawing: the game skips on its own
     }
-    if (retraces_seen - last_drawn < static_cast<uint64_t>(rdp_retraces())) {
+    if (retraces_seen - last_drawn < static_cast<uint64_t>(needed)) {
         MEM_W(0, counter) = 1;
         forced_busy = true;
         steps_held++;
@@ -248,4 +252,8 @@ extern "C" void knife_edge_rdp_gate_totals(void) {
                  static_cast<unsigned long long>(steps_allowed),
                  static_cast<unsigned long long>(steps_held));
     std::fflush(stderr);
+}
+
+extern "C" void knife_edge_rdp_set_frame_retraces(int retraces) {
+    frame_retraces = retraces;
 }

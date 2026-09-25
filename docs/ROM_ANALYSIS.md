@@ -217,6 +217,32 @@ gives a complete picture of what the game touches:
 So the device is EEPROM or nothing; EEPROM could not be confirmed from statics.
 `KNIFE_EDGE_SAVE_TYPE` stays `None` in `CMakeLists.txt` rather than guessed.
 
+## In-flight transmissions and the game's only real-time clock
+
+The radio dialogue (pilot and C.O. portraits, typed text) lives in the gameplay
+overlay at ROM `0x1501A0`. Established from the code and from
+`KNIFE_EDGE_COMM_LOG=1` runs, 2026-09-25:
+
+- **Script.** Loaded into `D_800BE400` as 16-bit little-endian codes: lowercase
+  is ASCII − 45, uppercase ASCII − 39, digits `0x10 + n`, space `0`. Control
+  codes: `0x8010`–`0x8019` pause (step counts from a table), `0x8020` newline,
+  `0x8021` new page, `0x8022` end, `0x8030`/`0x8031` open, `0x8080`–`0x8082`
+  select speaker (0 C.O., 2 pilot).
+- **State machine.** `func_801972A8` opens (sound `0x35`, `osSetTime(0)`);
+  `func_8019743C` ticks once per game step: 9 steps of box opening, then one
+  character per step; `0x8022` plays `0x36` and closes.
+- **Portrait static.** `func_80197B54` draws the portrait. While one is up, each
+  step has a 1-in-64 chance (`func_800E4CDC() & 0x3F`) to show static and play
+  sound `0x37` in the same call, so the sound and the picture share a step by
+  construction.
+- **The real-time floor.** `func_801978C0` draws the box and then busy-waits
+  until `osGetTime() >= 0x2AB980` (2,800,000 ticks, 59.73 ms at 46.875 MHz)
+  and calls `osSetTime(0)`. While a transmission is up, no step can be shorter
+  than 59.7 ms, which caps the game at 16.7 steps a second. Nothing else in the
+  game reads `osGetTime`; every other `osGetCount`/`osGetTime` caller is
+  libultra. Measured in the port: 60.1 ms per step on average across the
+  45-second opening transmission of stage 1.
+
 ## Open questions
 
 1. Where is the audio microcode block, and which revision is it?
