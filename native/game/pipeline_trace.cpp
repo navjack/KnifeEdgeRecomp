@@ -13,6 +13,7 @@
 // hits -- the interesting question is whether a step happens at all, and an
 // unbounded log of a 60 Hz pipeline drowns it.
 #include <atomic>
+#include <cstring>
 #include <cmath>
 #include <set>
 #include <string>
@@ -131,6 +132,13 @@ const std::set<int>& dump_indices() {
     return wanted;
 }
 
+// Graphics tasks started so far. The display list for task N is built while
+// this still reads N, so a probe in drawing code gates on it directly.
+std::atomic<int> gfx_tasks_started{0};
+
+// The guMtxF2L call site that ran last, set by a hook just before each jal.
+std::atomic<uint32_t> f2l_site{0};
+
 void dump_matrices(uint8_t* rdram, uint32_t display_list, int task_index) {
     uint32_t segment[16] = {};
     std::vector<uint32_t> returns;
@@ -225,12 +233,11 @@ void knife_edge_pipeline_submitted(uint8_t* rdram, recomp_context* ctx) {
 // osSpTaskStartGo_recomp only reads it.
 void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
     static std::atomic<int> seen{0};
-    static std::atomic<int> gfx_tasks{0};
     const uint32_t task = static_cast<uint32_t>(ctx->r4);
     const int32_t type = MEM_W(0x0, ctx->r4);
     const int32_t data_ptr = MEM_W(0x30, ctx->r4);
     if (type == 1 && !dump_indices().empty()) {
-        const int index = gfx_tasks.fetch_add(1);
+        const int index = gfx_tasks_started.fetch_add(1);
         if (dump_indices().count(index) != 0) {
             dump_matrices(rdram, static_cast<uint32_t>(data_ptr), index);
         }
@@ -423,4 +430,151 @@ void knife_edge_pipeline_stalled(int32_t pending, int seconds) {
 // this from there instead, or the totals never print.
 extern "C" void knife_edge_pipeline_totals(void) {
     summarize();
+}
+
+// Entry of func_800C58E8, the per-object "draw with transform" the frame
+// callbacks call once per object. Logs every argument, on dumped frames only,
+// so the one that moves by the measured rotation step can be picked out by eye
+// rather than guessed from the disassembly. Stack arguments are the caller's
+// outgoing words at 0x10($sp) and up, since $sp is not yet adjusted here.
+extern "C" void knife_edge_object_probe(uint8_t* rdram, recomp_context* ctx) {
+    if (dump_indices().empty() || dump_indices().count(gfx_tasks_started.load()) == 0) {
+        return;
+    }
+    const auto as_float = [](uint32_t bits) {
+        float value;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+    std::fprintf(stderr, "[obj] frame %d ra 0x%08X a0 0x%08X a1 0x%08X a2 %g a3 %g |",
+                 gfx_tasks_started.load(), static_cast<uint32_t>(ctx->r31),
+                 static_cast<uint32_t>(ctx->r4), static_cast<uint32_t>(ctx->r5),
+                 as_float(static_cast<uint32_t>(ctx->r6)), as_float(static_cast<uint32_t>(ctx->r7)));
+    for (int offset = 0x10; offset <= 0x2C; offset += 4) {
+        const uint32_t word = static_cast<uint32_t>(MEM_W(offset, ctx->r29));
+        std::fprintf(stderr, " %02X:%g", offset, as_float(word));
+    }
+    std::fprintf(stderr, "\n");
+}
+
+// Entry of func_800D6C20, the game's guMtxF2L: a0 is the float matrix, a1 the
+// fixed-point Mtx the RSP will load. Logs the pair on dumped frames, so each
+// Mtx address in a display list can be traced back to the float matrix that
+// produced it -- which says whether a bad rotation was already in the floats
+// or appeared in the conversion.
+extern "C" void knife_edge_mtxf2l_probe(uint8_t* rdram, recomp_context* ctx) {
+    if (dump_indices().empty() || dump_indices().count(gfx_tasks_started.load()) == 0) {
+        return;
+    }
+    float m[16];
+    for (int i = 0; i < 16; i++) {
+        const uint32_t bits = static_cast<uint32_t>(MEM_W(i * 4, ctx->r4));
+        std::memcpy(&m[i], &bits, sizeof(float));
+    }
+    std::fprintf(stderr,
+                 "[f2l] frame %d site 0x%08X out 0x%06X from 0x%08X  r0 %+.4f %+.4f %+.4f  r1 %+.4f %+.4f %+.4f  "
+                 "r2 %+.4f %+.4f %+.4f  t %+.2f %+.2f %+.2f\n",
+                 gfx_tasks_started.load(), f2l_site.load(), static_cast<uint32_t>(ctx->r5) & 0x00FFFFFFu,
+                 static_cast<uint32_t>(ctx->r4), m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10],
+                 m[12], m[13], m[14]);
+}
+
+// Placed just before each of guMtxF2L's eleven call sites, so the conversion
+// probe can say which caller built the matrix it is looking at.
+extern "C" void knife_edge_f2l_site(uint32_t site) {
+    f2l_site.store(site);
+}
+
+// Entry of func_800C6868, which builds scale x rotation x translation from a
+// rotation matrix its caller hands over in a2. Logs the model pointer (a0) and
+// position (a3, then 0x10/0x14($sp)) on dumped frames; the model address names
+// the caller that decided the rotation.
+extern "C" void knife_edge_srt_probe(uint8_t* rdram, recomp_context* ctx) {
+    if (dump_indices().empty() || dump_indices().count(gfx_tasks_started.load()) == 0) {
+        return;
+    }
+    const auto as_float = [](uint32_t bits) {
+        float value;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+    std::fprintf(stderr, "[srt] frame %d model 0x%08X a1 0x%08X rot@0x%08X pos %.2f %.2f %.2f\n",
+                 gfx_tasks_started.load(), static_cast<uint32_t>(ctx->r4),
+                 static_cast<uint32_t>(ctx->r5), static_cast<uint32_t>(ctx->r6),
+                 as_float(static_cast<uint32_t>(ctx->r7)),
+                 as_float(static_cast<uint32_t>(MEM_W(0x10, ctx->r29))),
+                 as_float(static_cast<uint32_t>(MEM_W(0x14, ctx->r29))));
+    // The first object is the spinner under investigation: dump the words
+    // around its rotation matrix, as float and as raw hex, to find the field
+    // that steps by the spin each frame.
+    static int last_frame = -1;
+    if (gfx_tasks_started.load() != last_frame) {
+        last_frame = gfx_tasks_started.load();
+        const gpr base = static_cast<gpr>(static_cast<int32_t>(static_cast<uint32_t>(ctx->r6) - 0xC0));
+        for (int offset = 0; offset < 0x100; offset += 4) {
+            const uint32_t word = static_cast<uint32_t>(MEM_W(offset, base));
+            std::fprintf(stderr, "[struct] frame %d rot%+04d 0x%08X %g\n", last_frame,
+                         offset - 0xC0, word, as_float(word));
+        }
+    }
+}
+
+// Entry of a float-matrix builder (guRotateF and relatives). Logs its
+// arguments when the destination is the spinner's embedded rotation matrix,
+// on dumped frames, so the angle it was built from can be read directly.
+extern "C" void knife_edge_rot_probe(uint8_t* rdram, recomp_context* ctx, uint32_t fn) {
+    const uint32_t dest = static_cast<uint32_t>(ctx->r4);
+    // The spinner's embedded rotation, or the per-frame delta it is multiplied
+    // by, which is built in a stack buffer at 0x80144B60.
+    const bool spinner = dest >= 0x8011D600u && dest < 0x8011D700u;
+    const bool delta = dest >= 0x80144B00u && dest < 0x80144C00u;
+    if (!spinner && !delta) {
+        return;
+    }
+    if (dump_indices().empty() || dump_indices().count(gfx_tasks_started.load()) == 0) {
+        return;
+    }
+    const auto as_float = [](uint32_t bits) {
+        float value;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+    std::fprintf(stderr, "[rot] frame %d fn 0x%08X dest 0x%08X a1 %g a2 %g a3 %g sp10 %g sp14 %g (a1 raw 0x%08X)\n",
+                 gfx_tasks_started.load(), fn, dest, as_float(static_cast<uint32_t>(ctx->r5)),
+                 as_float(static_cast<uint32_t>(ctx->r6)), as_float(static_cast<uint32_t>(ctx->r7)),
+                 as_float(static_cast<uint32_t>(MEM_W(0x10, ctx->r29))),
+                 as_float(static_cast<uint32_t>(MEM_W(0x14, ctx->r29))),
+                 static_cast<uint32_t>(ctx->r5));
+}
+
+// guMtxCatF (func_800D6F30) writes its product through a2, and guMtxIdentF
+// (func_800D6D20) through a0. Log either when it lands in the spinner's
+// embedded rotation, on dumped frames, with the inputs' first rows.
+extern "C" void knife_edge_cat_probe(uint8_t* rdram, recomp_context* ctx, uint32_t fn) {
+    const uint32_t dest = static_cast<uint32_t>(fn == 0x800D6F30u ? ctx->r6 : ctx->r4);
+    const bool spinner = dest >= 0x8011D600u && dest < 0x8011D700u;
+    const bool delta = dest >= 0x80144B00u && dest < 0x80144C00u;
+    if (!spinner && !delta) {
+        return;
+    }
+    if (dump_indices().empty() || dump_indices().count(gfx_tasks_started.load()) == 0) {
+        return;
+    }
+    const auto row = [&](gpr base) {
+        float v[3];
+        for (int i = 0; i < 3; i++) {
+            const uint32_t bits = static_cast<uint32_t>(MEM_W(i * 4, base));
+            std::memcpy(&v[i], &bits, sizeof(float));
+        }
+        char out[64];
+        std::snprintf(out, sizeof(out), "(%+.3f %+.3f %+.3f)", v[0], v[1], v[2]);
+        return std::string(out);
+    };
+    if (fn == 0x800D6F30u) {
+        std::fprintf(stderr, "[cat] frame %d dest 0x%08X a0 0x%08X %s  a1 0x%08X %s\n",
+                     gfx_tasks_started.load(), dest, static_cast<uint32_t>(ctx->r4),
+                     row(ctx->r4).c_str(), static_cast<uint32_t>(ctx->r5), row(ctx->r5).c_str());
+    } else {
+        std::fprintf(stderr, "[cat] frame %d ident 0x%08X\n", gfx_tasks_started.load(), dest);
+    }
 }

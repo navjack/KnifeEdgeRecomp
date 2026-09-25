@@ -501,3 +501,114 @@ text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017DA8C);"
 func = "ovl_0F4810_func_8017B778"
 before_vram = 0x8017BB48
 text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB48);"
+
+[[patches.hook]]
+# Entry of the per-object draw-with-transform, to log its arguments on the
+# frames named by KNIFE_EDGE_DUMP_MTX.
+func = "func_800C58E8"
+before_vram = 0x800C58E8
+text = "knife_edge_object_probe(rdram, ctx);"
+
+[[patches.hook]]
+# Entry of the game's guMtxF2L: logs float-in / Mtx-out pairs on dumped frames.
+func = "func_800D6C20"
+before_vram = 0x800D6C20
+text = "knife_edge_mtxf2l_probe(rdram, ctx);"
+
+# One tag per guMtxF2L call site (all eleven), read by the conversion probe.
+[[patches.hook]]
+func = "func_800C5634"
+before_vram = 0x800C58CC
+text = "knife_edge_f2l_site(0x800C58CC);"
+
+[[patches.hook]]
+func = "func_800C58E8"
+before_vram = 0x800C5B08
+text = "knife_edge_f2l_site(0x800C5B08);"
+
+[[patches.hook]]
+func = "func_800C5B94"
+before_vram = 0x800C5DB4
+text = "knife_edge_f2l_site(0x800C5DB4);"
+
+[[patches.hook]]
+func = "func_800C5E40"
+before_vram = 0x800C6014
+text = "knife_edge_f2l_site(0x800C6014);"
+
+[[patches.hook]]
+func = "func_800C6868"
+before_vram = 0x800C6AF0
+text = "knife_edge_f2l_site(0x800C6AF0);"
+
+[[patches.hook]]
+func = "func_800D6868"
+before_vram = 0x800D68C8
+text = "knife_edge_f2l_site(0x800D68C8);"
+
+[[patches.hook]]
+func = "func_800D6DA8"
+before_vram = 0x800D6DC0
+text = "knife_edge_f2l_site(0x800D6DC0);"
+
+[[patches.hook]]
+func = "func_800D72B4"
+before_vram = 0x800D72EC
+text = "knife_edge_f2l_site(0x800D72EC);"
+
+[[patches.hook]]
+func = "func_800D7AB0"
+before_vram = 0x800D7AF0
+text = "knife_edge_f2l_site(0x800D7AF0);"
+
+[[patches.hook]]
+func = "func_800D8248"
+before_vram = 0x800D82E8
+text = "knife_edge_f2l_site(0x800D82E8);"
+
+[[patches.hook]]
+func = "func_800D870C"
+before_vram = 0x800D876C
+text = "knife_edge_f2l_site(0x800D876C);"
+
+
+[[patches.hook]]
+# Entry of the scale-rotate-translate builder: model pointer and position.
+func = "func_800C6868"
+before_vram = 0x800C6868
+text = "knife_edge_srt_probe(rdram, ctx);"
+
+# Float-matrix builders (guRotateF and relatives): log calls that build the
+# spinner's embedded rotation, on dumped frames.
+[[patches.hook]]
+func = "func_800D6DD8"
+before_vram = 0x800D6DD8
+text = "knife_edge_rot_probe(rdram, ctx, 0x800D6DD8);"
+
+[[patches.hook]]
+func = "func_800D7120"
+before_vram = 0x800D7120
+text = "knife_edge_rot_probe(rdram, ctx, 0x800D7120);"
+
+[[patches.hook]]
+func = "func_800D7B10"
+before_vram = 0x800D7B10
+text = "knife_edge_rot_probe(rdram, ctx, 0x800D7B10);"
+
+[[patches.hook]]
+func = "func_800D8300"
+before_vram = 0x800D8300
+text = "knife_edge_rot_probe(rdram, ctx, 0x800D8300);"
+
+
+[[patches.hook]]
+# guMtxCatF entry: products landing in the spinner's rotation.
+func = "func_800D6F30"
+before_vram = 0x800D6F30
+text = "knife_edge_cat_probe(rdram, ctx, 0x800D6F30);"
+
+[[patches.hook]]
+# guMtxIdentF entry: identities written into the spinner's rotation.
+func = "func_800D6D20"
+before_vram = 0x800D6D20
+text = "knife_edge_cat_probe(rdram, ctx, 0x800D6D20);"

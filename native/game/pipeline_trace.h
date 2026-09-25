@@ -23,6 +23,12 @@ void knife_edge_pipeline_dispatch(uint8_t* rdram, recomp_context* ctx);
 void knife_edge_pipeline_frame(uint8_t* rdram, recomp_context* ctx);
 void knife_edge_pipeline_returned(uint8_t* rdram, recomp_context* ctx);
 void knife_edge_pipeline_totals(void);
+void knife_edge_object_probe(uint8_t* rdram, recomp_context* ctx);
+void knife_edge_mtxf2l_probe(uint8_t* rdram, recomp_context* ctx);
+void knife_edge_f2l_site(uint32_t site);
+void knife_edge_srt_probe(uint8_t* rdram, recomp_context* ctx);
+void knife_edge_rot_probe(uint8_t* rdram, recomp_context* ctx, uint32_t fn);
+void knife_edge_cat_probe(uint8_t* rdram, recomp_context* ctx, uint32_t fn);
 
 /* Reported by the native busy-wait in guest_waits.cpp, not by a hook. */
 void knife_edge_pipeline_stalled(int32_t pending, int seconds);
