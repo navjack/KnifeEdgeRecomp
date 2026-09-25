@@ -24,6 +24,7 @@
 #include "game_config.hpp"
 #include "game/pipeline_trace.h"
 #include "game/guest_waits.h"
+#include "game/session_log.h"
 #include "librecomp/game.hpp"
 #include "nfd.h"
 #include "recomp.h"
@@ -597,6 +598,7 @@ int SDLCALL quit_watch(void*, SDL_Event* event) {
 }
 
 int main(int argc, char** argv) {
+    knife_edge_session_log_start();
     if (!parse_runtime_options(argc, argv)) {
         return EXIT_FAILURE;
     }

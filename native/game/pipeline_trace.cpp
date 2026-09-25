@@ -137,6 +137,9 @@ const std::set<int>& dump_indices() {
 // this still reads N, so a probe in drawing code gates on it directly.
 std::atomic<int> gfx_tasks_started{0};
 
+// Every graphics task started, tracing or not: the hang watchdog's heartbeat.
+std::atomic<long long> gfx_tasks_total{0};
+
 // The guMtxF2L call site that ran last, set by a hook just before each jal.
 std::atomic<uint32_t> f2l_site{0};
 
@@ -237,6 +240,9 @@ void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
     const uint32_t task = static_cast<uint32_t>(ctx->r4);
     const int32_t type = MEM_W(0x0, ctx->r4);
     const int32_t data_ptr = MEM_W(0x30, ctx->r4);
+    if (type == 1) {
+        gfx_tasks_total.fetch_add(1, std::memory_order_relaxed);
+    }
     if (type == 1 && !dump_indices().empty()) {
         const int index = gfx_tasks_started.fetch_add(1);
         if (dump_indices().count(index) != 0) {
@@ -602,4 +608,8 @@ extern "C" void knife_edge_cat_probe(uint8_t* rdram, recomp_context* ctx, uint32
     } else {
         std::fprintf(stderr, "[cat] frame %d ident 0x%08X\n", gfx_tasks_started.load(), dest);
     }
+}
+
+extern "C" long long knife_edge_gfx_tasks_total(void) {
+    return gfx_tasks_total.load(std::memory_order_relaxed);
 }
