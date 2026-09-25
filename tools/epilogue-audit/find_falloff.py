@@ -35,7 +35,13 @@ BRANCHES = {
     "bc1t", "bc1f", "bc1tl", "bc1fl",
 }
 TARGET = re.compile(r"\.L([0-9A-Fa-f]{8})")
-LIMIT = 0x4000  # never grow a function by more than this; beyond it, report only
+LIMIT = 0x10000  # never grow a function by more than this; beyond it, report only
+# Instructions N64Recomp rejects outright ("Unhandled instruction"). Compiled
+# game code essentially never contains them, so meeting one while growing a
+# function means the growth has run into data Splat decoded as code -- as with
+# ovl_255660_func_80205DD0, whose tail decodes as `tnei`.
+UNHANDLED = {"tnei", "teqi", "tgei", "tgeiu", "tlti", "tltiu", "tne", "teq",
+             "tge", "tgeu", "tlt", "tltu", "ll", "sc", "lld", "scd"}  # never grow a function by more than this; beyond it, report only
 
 
 def is_terminal(mnem, ops):
@@ -63,6 +69,24 @@ def closed_end(body, index, start, end):
             grown += 4  # not yet terminal: take the next instruction
         if grown - start > LIMIT or grown - 4 not in index:
             return None
+        # Check everything this step takes in -- including the instruction just
+        # added above -- before accepting it.
+        for vram, _word, mnem, ops in body[index.get(end, len(body)):]:
+            if vram >= grown:
+                break
+            # Never grow over data: Splat writes it as `.word` with an "invalid
+            # instruction" note, or it decodes as something N64Recomp rejects.
+            if mnem.startswith(".") or mnem in UNHANDLED:
+                return None
+            # Nor over a switch dispatch (`jr` through anything but $ra) unless
+            # the function's own bounds check comes first: N64Recomp sizes a
+            # jump table from that check, and a fragment that starts mid-switch
+            # has none -- "Failed to determine size of jump table", as
+            # ovl_0EF7C0_func_8017DEA0 showed.
+            if mnem == "jr" and not ops.startswith("$ra"):
+                bounded = any(m == "sltiu" for v, _w, m, _o in body[index[start]:index[vram]])
+                if not bounded:
+                    return None
         end = grown
 
 

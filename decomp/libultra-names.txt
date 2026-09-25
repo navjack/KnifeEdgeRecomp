@@ -37,8 +37,10 @@
 0x800DAB70 osViSwapBuffer
 0x800DABC0 osContInit
 0x800DAF00 osContStartReadData
+0x800DAF84 osContGetReadData
 0x800DB0E0 osContStartQuery
 0x800DB164 osContGetQuery
+0x800DB404 osMotorInit
 0x800DB560 __osDisableInt
 0x800DC200 osWritebackDCache
 0x800DD800 osJamMesg

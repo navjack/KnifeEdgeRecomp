@@ -7,7 +7,7 @@ symbols_file_path = "../decomp/knife-edge.candidate.syms.toml"
 output_func_path = "../generated-candidate"
 entrypoint = 0x800C2400
 functions_per_output_file = 50
-recomp_include = "#include \"recomp.h\"\n#include \"game/overlay_bridge.h\"\n#include \"game/pipeline_trace.h\"\n#include \"game/guest_waits.h\""
+recomp_include = "#include \"recomp.h\"\n#include \"game/overlay_bridge.h\"\n#include \"game/pipeline_trace.h\"\n#include \"game/guest_waits.h\"\n#include \"game/rumble.h\""
 uses_mips3_float_mode = false
 # relocatable_sections_path is deliberately NOT set.
 #
@@ -33,6 +33,11 @@ uses_mips3_float_mode = false
 # the SP/DP completions it is waiting for are never delivered.
 ignored = [
     "func_800D2B40",
+    # __osMotorAccess (osMotorStart/osMotorStop): recompiled, it drives the
+    # Rumble Pak through __osSiRawStartDma and faults on SI_STATUS. N64Recomp
+    # lists the name as reimplemented, but the runtime ships no
+    # __osMotorAccess_recomp, so native/game/rumble.cpp forwards it instead.
+    "func_800DB190",
 ]
 
 stubs = [
@@ -857,4 +862,557 @@ text = "knife_edge_f2l_site(0x801DB450);"
 func = "ovl_3EFDD0_func_801DB23C"
 before_vram = 0x801DB524
 text = "knife_edge_f2l_site(0x801DB524);"
+
+# Wait loops the store rule used to reject: they save a value to a global
+# they are not waiting on. Found by tools/spin-scan/find_spin_loops.py --hooks.
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "func_800CC4D0"
+before_vram = 0x800CC5B0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x800CC5B0);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "func_800CC9F0"
+before_vram = 0x800CCA70
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x800CCA70);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "func_800CC9F0"
+before_vram = 0x800CCAAC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x800CCAAC);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "func_800CCABC"
+before_vram = 0x800CCB3C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x800CCB3C);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "func_800CCABC"
+before_vram = 0x800CCB78
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x800CCB78);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1199D0_func_8017B0C0"
+before_vram = 0x8017B274
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B274);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1199D0_func_8017B0C0"
+before_vram = 0x8017B378
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B378);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1199D0_func_8017B0C0"
+before_vram = 0x8017B47C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B47C);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1199D0_func_8017B0C0"
+before_vram = 0x8017B580
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B580);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1501A0_func_8016E454"
+before_vram = 0x8016E510
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8016E510);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1501A0_func_80176860"
+before_vram = 0x801769F0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x801769F0);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1501A0_func_80180248"
+before_vram = 0x801802A8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x801802A8);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1501A0_func_801922A8"
+before_vram = 0x80192514
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80192514);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1501A0_func_80193A34"
+before_vram = 0x80193B24
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80193B24);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1501A0_func_80193B40"
+before_vram = 0x80193C58
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80193C58);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_1501A0_func_801972A8"
+before_vram = 0x801973FC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x801973FC);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_255660_func_801E2894"
+before_vram = 0x801E2AC8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x801E2AC8);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_0EF7C0_func_8017B0C0"
+before_vram = 0x8017B144
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B144);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_0EF7C0_func_8017B0C0"
+before_vram = 0x8017B158
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B158);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_0EF7C0_func_8017B0C0"
+before_vram = 0x8017B170
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B170);"
+
+[[patches.hook]]
+# waits that store a rand() or similar to a global they do not wait on
+func = "ovl_0EF7C0_func_8017C95C"
+before_vram = 0x8017DE18
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017DE18);"
+
+# The same hooks again in every other function that contains their address.
+# Overlapping extents compile the same code into more than one function, and
+# a hook only runs in the copy it names -- the menu wait in
+# ovl_1199D0_func_8017B650 was hooked only in ovl_1199D0_func_8017B0C0's copy.
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B2D4"
+before_vram = 0x8017B6BC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6BC);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B3C8"
+before_vram = 0x8017B6BC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6BC);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B48C"
+before_vram = 0x8017B6BC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6BC);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B4A4"
+before_vram = 0x8017B6BC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6BC);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B51C"
+before_vram = 0x8017B6BC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6BC);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B650"
+before_vram = 0x8017B6BC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6BC);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B678"
+before_vram = 0x8017B6BC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6BC);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B690"
+before_vram = 0x8017B6BC
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6BC);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B2D4"
+before_vram = 0x8017B6D0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6D0);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B3C8"
+before_vram = 0x8017B6D0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6D0);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B48C"
+before_vram = 0x8017B6D0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6D0);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B4A4"
+before_vram = 0x8017B6D0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6D0);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B51C"
+before_vram = 0x8017B6D0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6D0);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B650"
+before_vram = 0x8017B6D0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6D0);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B678"
+before_vram = 0x8017B6D0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6D0);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B690"
+before_vram = 0x8017B6D0
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6D0);"
+
+[[patches.hook]]
+func = "ovl_12C2F0_func_8017BB94"
+before_vram = 0x8017BEF8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BEF8);"
+
+[[patches.hook]]
+func = "ovl_12C2F0_func_8017BE90"
+before_vram = 0x8017BEF8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BEF8);"
+
+[[patches.hook]]
+func = "ovl_12C2F0_func_8017BB94"
+before_vram = 0x8017BF0C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BF0C);"
+
+[[patches.hook]]
+func = "ovl_12C2F0_func_8017BE90"
+before_vram = 0x8017BF0C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BF0C);"
+
+[[patches.hook]]
+func = "ovl_0EF7C0_func_8017DA00"
+before_vram = 0x8017DA60
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017DA60);"
+
+[[patches.hook]]
+func = "ovl_0EF7C0_func_8017DA00"
+before_vram = 0x8017DA74
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017DA74);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017B97C"
+before_vram = 0x8017BB1C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB1C);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017B9F8"
+before_vram = 0x8017BB1C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB1C);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017BA54"
+before_vram = 0x8017BB1C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB1C);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017BAA4"
+before_vram = 0x8017BB1C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB1C);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017BAE8"
+before_vram = 0x8017BB1C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB1C);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017B97C"
+before_vram = 0x8017BB30
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB30);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017B9F8"
+before_vram = 0x8017BB30
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB30);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017BA54"
+before_vram = 0x8017BB30
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB30);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017BAA4"
+before_vram = 0x8017BB30
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB30);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017BAE8"
+before_vram = 0x8017BB30
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB30);"
+
+[[patches.hook]]
+func = "func_800E35A0"
+before_vram = 0x800E3678
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x800E3678);"
+
+[[patches.hook]]
+func = "func_800E35A0"
+before_vram = 0x800E3710
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x800E3710);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B2D4"
+before_vram = 0x8017B6E8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6E8);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B3C8"
+before_vram = 0x8017B6E8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6E8);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B48C"
+before_vram = 0x8017B6E8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6E8);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B4A4"
+before_vram = 0x8017B6E8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6E8);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B51C"
+before_vram = 0x8017B6E8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6E8);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B650"
+before_vram = 0x8017B6E8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6E8);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B678"
+before_vram = 0x8017B6E8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6E8);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B690"
+before_vram = 0x8017B6E8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B6E8);"
+
+[[patches.hook]]
+func = "ovl_12C2F0_func_8017BB94"
+before_vram = 0x8017BF24
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BF24);"
+
+[[patches.hook]]
+func = "ovl_12C2F0_func_8017BE90"
+before_vram = 0x8017BF24
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BF24);"
+
+[[patches.hook]]
+func = "ovl_0EF7C0_func_8017DA00"
+before_vram = 0x8017DA8C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017DA8C);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017B97C"
+before_vram = 0x8017BB48
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB48);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017B9F8"
+before_vram = 0x8017BB48
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB48);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017BA54"
+before_vram = 0x8017BB48
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB48);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017BAA4"
+before_vram = 0x8017BB48
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB48);"
+
+[[patches.hook]]
+func = "ovl_0F4810_func_8017BAE8"
+before_vram = 0x8017BB48
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BB48);"
+
+[[patches.hook]]
+func = "func_800D7120"
+before_vram = 0x800D72EC
+text = "knife_edge_f2l_site(0x800D72EC);"
+
+[[patches.hook]]
+func = "func_800D7A50"
+before_vram = 0x800D7AF0
+text = "knife_edge_f2l_site(0x800D7AF0);"
+
+[[patches.hook]]
+func = "func_800D7B10"
+before_vram = 0x800D82E8
+text = "knife_edge_f2l_site(0x800D82E8);"
+
+[[patches.hook]]
+func = "func_800D8300"
+before_vram = 0x800D876C
+text = "knife_edge_f2l_site(0x800D876C);"
+
+[[patches.hook]]
+func = "func_800D7120"
+before_vram = 0x800D72E0
+text = "knife_edge_f2l_site(0x800D72E0);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8017FF94"
+before_vram = 0x80180050
+text = "knife_edge_f2l_site(0x80180050);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801D97A8"
+before_vram = 0x801DBC5C
+text = "knife_edge_f2l_site(0x801DBC5C);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801D97A8"
+before_vram = 0x801DBCEC
+text = "knife_edge_f2l_site(0x801DBCEC);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801D97A8"
+before_vram = 0x801DBD94
+text = "knife_edge_f2l_site(0x801DBD94);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801D97A8"
+before_vram = 0x801DBE24
+text = "knife_edge_f2l_site(0x801DBE24);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801D85FC"
+before_vram = 0x801E0B70
+text = "knife_edge_f2l_site(0x801E0B70);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801D85FC"
+before_vram = 0x801E0D5C
+text = "knife_edge_f2l_site(0x801E0D5C);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801D85FC"
+before_vram = 0x801E1558
+text = "knife_edge_f2l_site(0x801E1558);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801D85FC"
+before_vram = 0x801E1BC4
+text = "knife_edge_f2l_site(0x801E1BC4);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016D9E8"
+before_vram = 0x8016E490
+text = "knife_edge_f2l_site(0x8016E490);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016D9E8"
+before_vram = 0x8016E5B0
+text = "knife_edge_f2l_site(0x8016E5B0);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016E454"
+before_vram = 0x8016E5B0
+text = "knife_edge_f2l_site(0x8016E5B0);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016D9E8"
+before_vram = 0x8016E5E8
+text = "knife_edge_f2l_site(0x8016E5E8);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016E454"
+before_vram = 0x8016E5E8
+text = "knife_edge_f2l_site(0x8016E5E8);"
+
+[[patches.hook]]
+func = "ovl_3EFDD0_func_801DA6D0"
+before_vram = 0x801DB450
+text = "knife_edge_f2l_site(0x801DB450);"
+
+[[patches.hook]]
+func = "ovl_3EFDD0_func_801DA6D0"
+before_vram = 0x801DB524
+text = "knife_edge_f2l_site(0x801DB524);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B2D4"
+before_vram = 0x8017B378
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B378);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B2D4"
+before_vram = 0x8017B47C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B47C);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B3C8"
+before_vram = 0x8017B47C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B47C);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B2D4"
+before_vram = 0x8017B580
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B580);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B3C8"
+before_vram = 0x8017B580
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B580);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B48C"
+before_vram = 0x8017B580
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B580);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B4A4"
+before_vram = 0x8017B580
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B580);"
+
+[[patches.hook]]
+func = "ovl_1199D0_func_8017B51C"
+before_vram = 0x8017B580
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017B580);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801E29E8"
+before_vram = 0x801E2AC8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x801E2AC8);"
+
+[[patches.hook]]
+func = "ovl_0EF7C0_func_8017DD44"
+before_vram = 0x8017DE18
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017DE18);"
+
+# Copies of existing hooks for overlapping functions (sync_hooks.py).
+[[patches.hook]]
+func = "ovl_12C2F0_func_8017BE84"
+before_vram = 0x8017BEF8
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BEF8);"
+
+[[patches.hook]]
+func = "ovl_12C2F0_func_8017BE84"
+before_vram = 0x8017BF0C
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BF0C);"
+
+[[patches.hook]]
+func = "ovl_12C2F0_func_8017BE84"
+before_vram = 0x8017BF24
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x8017BF24);"
 

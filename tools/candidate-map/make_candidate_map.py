@@ -34,6 +34,10 @@ import sys
 
 LABEL_RE = re.compile(r"\.L([0-9A-Fa-f]{8})")
 JAL_RE = re.compile(r"\bjal\s+func_([0-9A-Fa-f]{8})")
+# A function taken by address -- a %hi/%lo pair or a .word in a table -- is an
+# entry point exactly as a jal target is. Frame callbacks are registered this
+# way and never called directly.
+POINTER_RE = re.compile(r"(?:%(?:hi|lo)\(|\.word\s+)func_([0-9A-Fa-f]{8})")
 SEGMENT_RE = re.compile(
     r"^  - name: (?P<name>\S+)\n"
     r"    type: code\n"
@@ -122,8 +126,14 @@ def parse_file(path):
 
 
 def call_targets(path):
-    """Every address a `jal` in this one file points at."""
-    return {int(m.group(1), 16) for m in JAL_RE.finditer(path.read_text())}
+    """Every entry point this one file names: `jal` targets and functions taken
+    by address. Counting only `jal` let the generator drop ovl_1199D0's frame
+    callback, func_8017B700 -- registered by pointer, never called -- as an
+    uncalled fragment once a widened neighbour covered it, and the game died
+    with "Failed to find function at 0x8017B700" on entering the menu."""
+    text = path.read_text()
+    return ({int(m.group(1), 16) for m in JAL_RE.finditer(text)}
+            | {int(m.group(1), 16) for m in POINTER_RE.finditer(text)})
 
 
 def split_at_targets(funcs, targets):
@@ -499,6 +509,9 @@ def main():
     # sharing that destination and N64Recomp resolves it at runtime anyway.
     all_targets = set()
     for src in sorted(asm.glob("*.s")):
+        all_targets |= call_targets(src)
+    # Callback and dispatch tables in the data segments point at code too.
+    for src in sorted((asm / "data").glob("*.s")):
         all_targets |= call_targets(src)
 
     segs = [("entry", 0x1000, 0x800C2400), ("main", 0x1050, 0x800C2450)]

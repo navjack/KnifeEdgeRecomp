@@ -126,18 +126,44 @@ def loops(path, function, instructions, reaching):
         # every iteration too but are not waiting on anything.
         if len(body) > 32:
             continue
-        if any(m.startswith("s")
-               and not m.startswith(("sll", "sra", "srl", "slt", "sub",
-                                     "syscall"))
-               and not STACK_STORE.match(operands_of)
-               for _, m, operands_of in body):
-            continue
         watched = {
-            re.search(r"%lo\((\w+)", operands).group(1)
+            found.group(1)
             for _, m, operands in body
-            if m.startswith(("lw", "lh", "lb")) and "%lo(" in operands
+            if m.startswith(("lw", "lh", "lb"))
+            for found in [re.search(r"%lo\((\w+)", operands)] if found
         }
         if not watched:
+            continue
+        # A store rules a loop out only if it writes something the loop waits
+        # on, or writes through a moving pointer -- the shape of a work loop
+        # such as memcpy. Stack locals are fine, and so is a store to some
+        # other fixed global: the menu wait in ovl_0EF7C0_func_8017B0C0 saves
+        # each rand() into D_8011D1E8 while it waits on D_8011D1B4 and the
+        # controller word, and rejecting it for that left the menu wedged.
+        fixed_bases = {}  # register -> the global it holds the address of
+        for _, m, operands in body:
+            hi = re.match(r"\$(\w+), %hi\((\w+)", operands)
+            if m == "lui" and hi:
+                fixed_bases[hi.group(1)] = hi.group(2)
+            lo = re.match(r"\$(\w+), \$(\w+), %lo\((\w+)", operands)
+            if m == "addiu" and lo and lo.group(2) in fixed_bases:
+                fixed_bases[lo.group(1)] = lo.group(3)
+
+        def disqualifying(operands):
+            if STACK_STORE.match(operands):
+                return False
+            named = re.search(r"%lo\((\w+)", operands)
+            if named:
+                return named.group(1) in watched
+            base = re.search(r"\(\$(\w+)\)$", operands)
+            if base and base.group(1) in fixed_bases:
+                return fixed_bases[base.group(1)] in watched
+            return True  # a store through a pointer the loop moves
+
+        if any(m.startswith("s")
+               and not m.startswith(("sll", "sra", "srl", "slt", "sub", "syscall"))
+               and disqualifying(operands)
+               for _, m, operands in body):
             continue
         yield function, vram, target_vram, len(body), sorted(watched)
 
@@ -181,17 +207,18 @@ def emit_hooks(root, map_path):
                 if vram <= branch < vram + size
                 and (sec is None or sec.endswith(stem) or path.stem == "1050")
             ]
-            if not match:
-                continue
-            _, name = match[0]
-            if (name, branch) in seen:
-                continue
-            seen.add((name, branch))
-            print(f"\n[[patches.hook]]")
-            print(f"# waits on {' '.join(watched)}")
-            print(f'func = "{name}"')
-            print(f"before_vram = 0x{branch:08X}")
-            print('text = "knife_edge_guest_poll(rdram, ctx);"')
+            # Every containing function, not the first: overlapping extents
+            # compile the same code into several functions, and a hook runs
+            # only in the copy it names.
+            for _, name in match:
+                if (name, branch) in seen:
+                    continue
+                seen.add((name, branch))
+                print(f"\n[[patches.hook]]")
+                print(f"# waits on {' '.join(watched)}")
+                print(f'func = "{name}"')
+                print(f"before_vram = 0x{branch:08X}")
+                print(f'text = "knife_edge_guest_poll_site(rdram, ctx, 0x{branch:08X});"')
 
 
 def main():
