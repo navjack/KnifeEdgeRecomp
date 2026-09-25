@@ -32,6 +32,8 @@ void knife_edge_srt_probe(uint8_t* rdram, recomp_context* ctx);
 void knife_edge_rot_probe(uint8_t* rdram, recomp_context* ctx, uint32_t fn);
 void knife_edge_cat_probe(uint8_t* rdram, recomp_context* ctx, uint32_t fn);
 void knife_edge_comm_probe(uint8_t* rdram, recomp_context* ctx, uint32_t site);
+void knife_edge_dma_probe(uint8_t* rdram, recomp_context* ctx, uint32_t site);
+void knife_edge_dma_take(uint64_t* step_bytes, uint64_t* other_bytes);
 
 /* Reported by the native busy-wait in guest_waits.cpp, not by a hook. */
 void knife_edge_pipeline_stalled(int32_t pending, int seconds);

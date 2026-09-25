@@ -23,6 +23,7 @@
 // If another spin-wait turns up, it belongs here too. The general fix is a
 // poll hook inside the recompiler's loop emission, which this project's pinned
 // N64ModernRuntime does not have; see patches/README.md.
+#include <chrono>
 #include <cstdint>
 
 #include <ultramodern/ultramodern.hpp>
@@ -108,6 +109,10 @@ extern "C" void knife_edge_guest_poll(uint8_t* rdram, recomp_context* ctx) {
 // those apart needs a per-loop count, not a total.
 uint64_t knife_edge_guest_instructions = 0;
 uint64_t knife_edge_idle_instructions = 0;
+__thread uint64_t knife_edge_thread_instructions = 0;
+namespace {
+thread_local uint64_t thread_idle_instructions = 0;
+}  // namespace
 
 extern "C" void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
                                            uint32_t site) {
@@ -137,9 +142,11 @@ extern "C" void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
     // scanner's own limit), so a longer run between two polls went through
     // real work -- the gameplay main loop passes its hooked branch after the
     // whole world update, which natively takes well under the 500 us window.
-    const uint64_t since_last_poll = knife_edge_guest_instructions - spin_mark;
+    // This thread's own instructions: other threads run during the wait below.
+    const uint64_t since_last_poll = knife_edge_thread_instructions - spin_mark;
     if (continuing && since_last_poll <= 64) {
         knife_edge_idle_instructions += since_last_poll;
+        thread_idle_instructions += since_last_poll;
     }
     if (!continuing) {
         spin_first = now;
@@ -148,7 +155,7 @@ extern "C" void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
     const bool spinning = now - spin_first > std::chrono::milliseconds{2};
     ultramodern::wait_for_external_message_timed(rdram, spinning ? poll_interval_ms : 0);
     ultramodern::check_running_queue(rdram);
-    spin_mark = knife_edge_guest_instructions;
+    spin_mark = knife_edge_thread_instructions;
 }
 
 // Printed alongside the pipeline totals, so the counts can be read against the
@@ -206,8 +213,34 @@ uint64_t last_drawn = 0;
 bool forced_busy = false;
 uint64_t steps_allowed = 0;
 uint64_t steps_held = 0;
+std::chrono::steady_clock::time_point step_started = std::chrono::steady_clock::now();
+uint64_t step_started_work = 0;
+bool step_running = false;
+// The counters of the thread that runs the step (the retrace callback's),
+// read from whichever thread submits the graphics task.
+const uint64_t* step_instructions = nullptr;
+const uint64_t* step_idle = nullptr;
 
 }  // namespace
+
+extern "C" int knife_edge_in_step(void) {
+    return step_running ? 1 : 0;
+}
+
+extern "C" void knife_edge_step_submitted(void) {
+    step_running = false;
+}
+
+extern "C" uint64_t knife_edge_step_work_so_far(void) {
+    if (step_instructions == nullptr) {
+        return 0;
+    }
+    return *step_instructions - *step_idle - step_started_work;
+}
+
+extern "C" double knife_edge_ms_since_step_start(void) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - step_started).count();
+}
 
 // Just before func_800D2930 hands the retrace callback the pending count. The
 // callback runs on this thread without yielding when it skips, so nothing else
@@ -231,6 +264,11 @@ extern "C" void knife_edge_rdp_gate_before(uint8_t* rdram, recomp_context* ctx) 
     } else {
         last_drawn = retraces_seen;
         steps_allowed++;
+        step_started = std::chrono::steady_clock::now();
+        step_instructions = &knife_edge_thread_instructions;
+        step_idle = &thread_idle_instructions;
+        step_started_work = *step_instructions - *step_idle;
+        step_running = true;
     }
 }
 

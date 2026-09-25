@@ -2,23 +2,34 @@
 // display list the game submits, so the game can be paced the way the console
 // paced it.
 //
-// Knife Edge steps only when no graphics task is pending. On hardware that
-// ties its speed to the RSP and RDP: busy frames take longer to draw, so the
-// game slows down exactly where the screen gets busy. RT64 draws instantly, so
-// without this the game steps on every retrace. The CPU is not the limit -- the
-// instruction counter puts a step at 3-8 ms of R4300 time -- so this estimates
-// the graphics side, walking the list as F3DEX2 would:
+// Knife Edge runs a step from the retrace callback, and only when no graphics
+// task is outstanding (func_800D2930 hands the callback the pending count, and
+// every callback opens with `bgtz pending, skip`). So on hardware one frame is
+// the CPU's step followed by the RCP drawing it, in series, rounded up to the
+// next retrace. RT64 draws instantly and the recompiled CPU is fast, so without
+// this the game steps on every retrace.
 //
-//   RSP: each vertex is transformed and each triangle set up.
-//   RDP: each triangle is set up, then its covered pixels are filled; the cost
-//        per pixel depends on the cycle type (fill, copy, 1-cycle, 2-cycle) and
-//        on whether the Z-buffer is read and written.
+// The list is walked as F3DEX2 would: vertices are transformed by the matrices
+// the game loaded, triangles are classified the way the microcode classifies
+// them, and drawn triangles are clipped to the screen for their pixel area.
 //
-// Vertices are transformed with the matrices the game actually loaded, and each
-// triangle's screen area is taken after the viewport transform. The RSP feeds
-// the RDP through a FIFO, so the two overlap and a frame costs roughly the
-// slower of them. The rates below are published N64 figures and are the
-// model's assumptions; nothing here was measured on a console.
+// Where the costs come from:
+//
+//   Measured (F3DEX2 RSP cycles, from the F3DEX3 project's performance
+//   tables, https://hackern64.github.io/F3DEX3/performance.html):
+//     command dispatch 12; small RDP command 14; G_VTX before DMA 16;
+//     vertex pair 54 unlit, 73/76/88/91/103/106/118 with 1-7 directional
+//     lights; light transform 141 + 39 per extra light; triangle drawn 172,
+//     offscreen 27, to clip 32, backface 38, degenerate 42.
+//
+//   Documented (n64brew, RDP pipeline): 1 cycle per pixel in 1-cycle mode, 2
+//     in 2-cycle mode, 64 bits per cycle in fill and copy mode; pipe sync 50,
+//     tile sync 33, load sync 25 cycles.
+//
+//   Assumed, and marked so below: G_MTX cost, clipping work, RDP triangle and
+//     span setup, and sustained RDRAM bandwidth (~200 MB/s of the 562.5 MB/s
+//     peak). These are the model's free parameters; KNIFE_EDGE_RDP_MODEL_CSV
+//     records the raw counts so they can be varied offline.
 
 #include "rdp_model.h"
 
@@ -26,27 +37,43 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <mutex>
 #include <vector>
 
 #include "recomp.h"
 
 namespace {
 
-// Clocks.
-constexpr double rcp_hz = 62.5e6;         // RSP and RDP both run at 62.5 MHz
+constexpr double rcp_hz = 62.5e6;  // RSP and RDP clock
 
-// RSP (F3DEX2), in RCP cycles.
-constexpr double rsp_per_vertex = 70.0;   // transform, clip codes, lighting off
-constexpr double rsp_per_triangle = 90.0; // setup and RDP command generation
+// --- RSP, F3DEX2, measured ---
+constexpr double rsp_dispatch = 12;
+constexpr double rsp_small_rdp_command = 14;
+constexpr double rsp_vtx_command = 16;
+constexpr double rsp_vertex_pair[8] = {54, 73, 76, 88, 91, 103, 106, 118};  // by light count
+constexpr double rsp_light_xfrm_first = 141;
+constexpr double rsp_light_xfrm_extra = 39;
+constexpr double rsp_tri_draw = 172;
+constexpr double rsp_tri_offscreen = 27;
+constexpr double rsp_tri_clip = 32;
+constexpr double rsp_tri_backface = 38;
+constexpr double rsp_tri_degenerate = 42;
+// --- RSP, assumed ---
+constexpr double rsp_mtx = 60;           // DMA 64 bytes plus a 4x4 multiply
+constexpr double rsp_clip_work = 300;    // per clipped triangle, beyond the triangles it emits
 
-// RDP, in RCP cycles.
-constexpr double rdp_per_triangle = 30.0;       // edge walk setup
-constexpr double rdp_per_pixel_1cycle = 1.0;
-constexpr double rdp_per_pixel_2cycle = 2.0;
-constexpr double rdp_zbuffer_factor = 1.6;      // Z read-modify-write memory traffic
-constexpr double rdp_per_pixel_fill = 0.25;     // fill mode: four 16-bit pixels a cycle
-constexpr double rdp_per_pixel_copy = 0.25;     // copy mode texrects
-constexpr double rdp_per_command = 2.0;         // every command costs something
+// --- RDP, documented ---
+constexpr double rdp_sync_pipe = 50;
+constexpr double rdp_sync_tile = 33;
+constexpr double rdp_sync_load = 25;
+constexpr double rdp_pixels_per_cycle_fill = 4;  // 64 bits a cycle at 16 bpp
+constexpr double rdp_pixels_per_cycle_copy = 4;
+// --- RDP, assumed ---
+constexpr double rdp_bytes_per_cycle = 200e6 / rcp_hz;  // sustained RDRAM share, ~3.2 B/cycle
+constexpr double rdp_tri_setup = 30;     // edge-walker setup per triangle
+constexpr double rdp_span = 4;           // per scanline span
 
 struct Matrix {
     std::array<float, 16> m{};
@@ -98,8 +125,8 @@ Matrix read_matrix(uint8_t* rdram, uint32_t phys) {
     return out;
 }
 
-struct ScreenVertex {
-    float cx = 0, cy = 0, cw = 1;  // clip space
+struct Vertex {
+    float x = 0, y = 0, w = 1;  // clip space
     bool valid = false;
 };
 
@@ -135,15 +162,16 @@ double polygon_area(const std::vector<Point>& poly) {
     return sum * 0.5;
 }
 
-double last_culled_fraction = 0;
+FrameCounts last_counts;
 
 }  // namespace
 
-extern "C" double knife_edge_last_culled_fraction(void) {
-    return last_culled_fraction;
+extern "C" const FrameCounts* knife_edge_last_frame_counts(void) {
+    return &last_counts;
 }
 
 extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_list) {
+    FrameCounts n{};
     uint32_t segment[16] = {};
     std::vector<uint32_t> returns;
     std::vector<Matrix> modelview_stack;
@@ -151,74 +179,48 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
     Matrix modelview = identity();
     Matrix combined = identity();
     bool combined_dirty = true;
-    std::array<ScreenVertex, 64> vertices{};
-    // Viewport, in pixels: scale and translate. The game's own G_MOVEMEM sets it.
+    bool lights_dirty = true;
+    std::array<Vertex, 64> vertices{};
     float vp_scale_x = 160, vp_scale_y = 120, vp_trans_x = 160, vp_trans_y = 120;
-    bool zbuffer = false;
-    uint32_t cycle_type = 0;  // 0 1-cycle, 1 2-cycle, 2 copy, 3 fill
+    uint32_t geometry = 0;
+    uint32_t lights = 1;
+    uint32_t cycle_type = 0;   // 0 1-cycle, 1 2-cycle, 2 copy, 3 fill
+    uint32_t othermode_l = 0;  // Z_CMP 0x10, Z_UPD 0x20, IM_RD 0x40
+    uint32_t image_size = 2;   // G_SETTIMG texel size: 0 4b, 1 8b, 2 16b, 3 32b
+    uint32_t color_size = 2;   // G_SETCIMG pixel size
 
-    double rsp_cycles = 0, rdp_cycles = 0;
+    double rsp = 0, rdp = 0;
     uint32_t pc = display_list & 0x00FFFFFFu;
     const auto resolve = [&](uint32_t address) {
         return (segment[(address >> 24) & 0xF] + (address & 0x00FFFFFFu)) & 0x00FFFFFFu;
     };
-    const auto pixel_cost = [&]() {
-        double per = (cycle_type == 1) ? rdp_per_pixel_2cycle : rdp_per_pixel_1cycle;
-        if (zbuffer) {
-            per *= rdp_zbuffer_factor;
+    // Cycles for one pixel of a triangle or rectangle in the current mode: the
+    // pipeline rate, or the memory traffic at sustained bandwidth if slower.
+    const auto pixel_cycles = [&](bool rectangle) {
+        if (cycle_type == 3) {
+            return 1.0 / rdp_pixels_per_cycle_fill;
         }
-        return per;
+        if (cycle_type == 2) {
+            return 1.0 / rdp_pixels_per_cycle_copy;
+        }
+        const double pipe = cycle_type == 1 ? 2.0 : 1.0;
+        const double pixel_bytes = color_size == 3 ? 4.0 : 2.0;
+        double bytes = pixel_bytes;                          // colour write
+        if (othermode_l & 0x40) bytes += pixel_bytes;        // IM_RD: colour read
+        if (!rectangle && (othermode_l & 0x10)) bytes += 2;  // Z read
+        if (!rectangle && (othermode_l & 0x20)) bytes += 2;  // Z write
+        return std::max(pipe, bytes / rdp_bytes_per_cycle);
     };
-    uint32_t geometry = 0;
-    double triangles_total = 0, triangles_culled = 0;
-    const auto triangle = [&](uint32_t a, uint32_t b, uint32_t c) {
-        rsp_cycles += rsp_per_triangle;
-        if (a >= vertices.size() || b >= vertices.size() || c >= vertices.size()) {
-            return;
-        }
-        if (!vertices[a].valid || !vertices[b].valid || !vertices[c].valid) {
-            return;
-        }
-        triangles_total += 1;
-        // Near plane first, in clip space (x, y as ratios to w are not yet
-        // safe): Point.x carries the clip-space w, Point.y a vertex index-free
-        // blend, so clip x, y and w together by working on three parallel lists.
-        struct Clip { double x, y, w; };
-        std::vector<Clip> poly = {
-            {vertices[a].cx, vertices[a].cy, vertices[a].cw},
-            {vertices[b].cx, vertices[b].cy, vertices[b].cw},
-            {vertices[c].cx, vertices[c].cy, vertices[c].cw},
-        };
-        constexpr double near_w = 1e-2;
-        std::vector<Clip> front;
-        for (size_t i = 0; i < poly.size(); i++) {
-            const Clip& p0 = poly[i];
-            const Clip& p1 = poly[(i + 1) % poly.size()];
-            const bool in0 = p0.w > near_w, in1 = p1.w > near_w;
-            if (in0) {
-                front.push_back(p0);
-            }
-            if (in0 != in1) {
-                const double t = (near_w - p0.w) / (p1.w - p0.w);
-                front.push_back({p0.x + (p1.x - p0.x) * t, p0.y + (p1.y - p0.y) * t, near_w});
-            }
-        }
-        if (front.size() < 3) {
-            return;  // wholly behind the eye
-        }
-        std::vector<Point> screen;
-        for (const Clip& v : front) {
-            screen.push_back({vp_trans_x + (v.x / v.w) * vp_scale_x, vp_trans_y - (v.y / v.w) * vp_scale_y});
-        }
-        // Screen y runs down, so a face authored counter-clockwise (the usual
-        // front) has negative signed area here. G_CULL_BACK (0x400) drops the
-        // positive ones, G_CULL_FRONT (0x200) the negative ones.
-        const double signed_area = polygon_area(screen);
-        if (((geometry & 0x400) && signed_area > 0) || ((geometry & 0x200) && signed_area < 0)) {
-            triangles_culled += 1;
-            return;  // culled on the RSP: the RDP never sees it
-        }
-        rdp_cycles += rdp_per_triangle;
+    const auto count_pixels = [&](double area, bool rectangle) {
+        if (cycle_type == 3) n.px_fill += area;
+        else if (cycle_type == 2) n.px_copy += area;
+        else if (!rectangle && (othermode_l & 0x30)) (cycle_type == 1 ? n.px_2c_z : n.px_1c_z) += area;
+        else (cycle_type == 1 ? n.px_2c : n.px_1c) += area;
+        rdp += area * pixel_cycles(rectangle);
+    };
+
+    // Rasterize a screen-space polygon (already on the near side of the eye).
+    const auto rasterize = [&](std::vector<Point> screen) {
         const double w = 320, h = 240;
         screen = clip_edge(screen, [](const Point& p) { return p.x >= 0; },
                            [](const Point& a, const Point& b) { double t = (0 - a.x) / (b.x - a.x); return Point{0, a.y + (b.y - a.y) * t}; });
@@ -229,9 +231,107 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
         screen = clip_edge(screen, [&](const Point& p) { return p.y <= h; },
                            [&](const Point& a, const Point& b) { double t = (h - a.y) / (b.y - a.y); return Point{a.x + (b.x - a.x) * t, h}; });
         if (screen.size() < 3) {
+            return;  // scissored away
+        }
+        double top = h, bottom = 0;
+        for (const Point& p : screen) {
+            top = std::min(top, p.y);
+            bottom = std::max(bottom, p.y);
+        }
+        const double spans = std::max(0.0, std::ceil(bottom) - std::floor(top));
+        n.spans += spans;
+        rdp += spans * rdp_span;
+        count_pixels(std::fabs(polygon_area(screen)), false);
+    };
+
+    const auto project = [&](double x, double y, double w) {
+        return Point{vp_trans_x + (x / w) * vp_scale_x, vp_trans_y - (y / w) * vp_scale_y};
+    };
+
+    const auto triangle = [&](uint32_t a, uint32_t b, uint32_t c) {
+        if (a >= vertices.size() || b >= vertices.size() || c >= vertices.size() ||
+            !vertices[a].valid || !vertices[b].valid || !vertices[c].valid) {
+            rsp += rsp_tri_offscreen;
             return;
         }
-        rdp_cycles += std::fabs(polygon_area(screen)) * pixel_cost();
+        const Vertex* v[3] = {&vertices[a], &vertices[b], &vertices[c]};
+        // Clip codes as F3DEX2 computes them: outside the screen, and outside
+        // the guard band (clip ratio 2) or behind the near plane.
+        uint32_t screen_all = 0xF, guard_any = 0;
+        constexpr double near_w = 1e-2;
+        for (const Vertex* p : v) {
+            uint32_t code = 0;
+            if (p->x < -p->w) code |= 1;
+            if (p->x > p->w) code |= 2;
+            if (p->y < -p->w) code |= 4;
+            if (p->y > p->w) code |= 8;
+            screen_all &= code;
+            if (p->w <= near_w || std::fabs(p->x) > 2 * p->w || std::fabs(p->y) > 2 * p->w) {
+                guard_any = 1;
+            }
+        }
+        if (screen_all != 0) {
+            n.tris_offscreen++;
+            rsp += rsp_tri_offscreen;
+            return;
+        }
+        if (guard_any) {
+            // Clipped on the RSP against the near plane (in clip space), then
+            // emitted as a fan; the guard band itself is left to the scissor.
+            n.tris_clipped++;
+            rsp += rsp_tri_clip + rsp_clip_work;
+            struct Clip { double x, y, w; };
+            std::vector<Clip> front;
+            for (int i = 0; i < 3; i++) {
+                const Vertex& p0 = *v[i];
+                const Vertex& p1 = *v[(i + 1) % 3];
+                const bool in0 = p0.w > near_w, in1 = p1.w > near_w;
+                if (in0) {
+                    front.push_back({p0.x, p0.y, p0.w});
+                }
+                if (in0 != in1) {
+                    const double t = (near_w - p0.w) / (p1.w - p0.w);
+                    front.push_back({p0.x + (p1.x - p0.x) * t, p0.y + (p1.y - p0.y) * t, near_w});
+                }
+            }
+            if (front.size() < 3) {
+                return;
+            }
+            std::vector<Point> screen;
+            for (const Clip& p : front) {
+                screen.push_back(project(p.x, p.y, p.w));
+            }
+            const double signed_area = polygon_area(screen);
+            if (((geometry & 0x400) && signed_area > 0) || ((geometry & 0x200) && signed_area < 0)) {
+                n.tris_backface++;
+                return;
+            }
+            const double emitted = static_cast<double>(screen.size() - 2);
+            n.tris_drawn += emitted;
+            rsp += emitted * rsp_tri_draw;
+            rdp += emitted * rdp_tri_setup;
+            rasterize(screen);
+            return;
+        }
+        std::vector<Point> screen = {project(v[0]->x, v[0]->y, v[0]->w), project(v[1]->x, v[1]->y, v[1]->w),
+                                     project(v[2]->x, v[2]->y, v[2]->w)};
+        // Screen y runs down, so a counter-clockwise (front) face has negative
+        // signed area here. G_CULL_BACK is 0x400, G_CULL_FRONT 0x200.
+        const double signed_area = polygon_area(screen);
+        if (((geometry & 0x400) && signed_area > 0) || ((geometry & 0x200) && signed_area < 0)) {
+            n.tris_backface++;
+            rsp += rsp_tri_backface;
+            return;
+        }
+        if (std::fabs(signed_area) < 0.25) {
+            n.tris_degenerate++;
+            rsp += rsp_tri_degenerate;
+            return;
+        }
+        n.tris_drawn++;
+        rsp += rsp_tri_draw;
+        rdp += rdp_tri_setup;
+        rasterize(screen);
     };
 
     for (int steps = 0; steps < 200000; steps++) {
@@ -241,34 +341,49 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
         const uint32_t w0 = word(rdram, pc);
         const uint32_t w1 = word(rdram, pc + 4);
         pc += 8;
-        rdp_cycles += rdp_per_command;
-        switch (w0 >> 24) {
+        n.commands++;
+        rsp += rsp_dispatch;
+        const uint32_t op = w0 >> 24;
+        if (op >= 0xE0) {
+            n.rdp_commands++;
+            rsp += rsp_small_rdp_command;  // passed through to the RDP
+        }
+        switch (op) {
             case 0x01: {  // G_VTX
                 const uint32_t count = (w0 >> 12) & 0xFF;
                 const uint32_t end = (w0 & 0xFF) >> 1;
                 const uint32_t first = end >= count ? end - count : 0;
                 const uint32_t source = resolve(w1);
+                const bool lit = (geometry & 0x00200000u) != 0;  // G_LIGHTING
+                const uint32_t light_count = std::min<uint32_t>(lights, 7);
+                rsp += rsp_vtx_command;
+                if (lit && lights_dirty) {
+                    rsp += rsp_light_xfrm_first + rsp_light_xfrm_extra * (std::max<uint32_t>(light_count, 1) - 1);
+                    n.light_xfrms++;
+                    lights_dirty = false;
+                }
+                rsp += rsp_vertex_pair[lit ? light_count : 0] * std::ceil(count / 2.0);
+                n.vertices += count;
+                if (lit) {
+                    n.vertices_lit += count;
+                }
                 if (combined_dirty) {
                     combined = multiply(modelview, projection);
                     combined_dirty = false;
                 }
                 for (uint32_t i = 0; i < count && first + i < vertices.size(); i++) {
-                    const uint32_t v = source + i * 16;
-                    rsp_cycles += rsp_per_vertex;
-                    if (!readable(v, 16)) {
+                    const uint32_t address = source + i * 16;
+                    if (!readable(address, 16)) {
                         continue;
                     }
-                    const float x = static_cast<float>(half(rdram, v));
-                    const float y = static_cast<float>(half(rdram, v + 2));
-                    const float z = static_cast<float>(half(rdram, v + 4));
+                    const float x = static_cast<float>(half(rdram, address));
+                    const float y = static_cast<float>(half(rdram, address + 2));
+                    const float z = static_cast<float>(half(rdram, address + 4));
                     const auto& m = combined.m;
-                    const float cx = x * m[0] + y * m[4] + z * m[8] + m[12];
-                    const float cy = x * m[1] + y * m[5] + z * m[9] + m[13];
-                    const float cw = x * m[3] + y * m[7] + z * m[11] + m[15];
-                    ScreenVertex& out = vertices[first + i];
-                    out.cx = cx;
-                    out.cy = cy;
-                    out.cw = cw;
+                    Vertex& out = vertices[first + i];
+                    out.x = x * m[0] + y * m[4] + z * m[8] + m[12];
+                    out.y = x * m[1] + y * m[5] + z * m[9] + m[13];
+                    out.w = x * m[3] + y * m[7] + z * m[11] + m[15];
                     out.valid = true;
                 }
                 break;
@@ -284,11 +399,12 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
             case 0xDA: {  // G_MTX; F3DEX2 stores the params XORed with G_MTX_PUSH
                 const uint32_t params = (w0 & 0xFF) ^ 1u;
                 const uint32_t source = resolve(w1);
+                n.matrices++;
+                rsp += rsp_mtx;
                 if (!readable(source, 64)) {
                     break;
                 }
                 const Matrix m = read_matrix(rdram, source);
-                rsp_cycles += 60;
                 if (params & 4) {  // projection
                     projection = (params & 2) ? m : multiply(m, projection);
                 } else {
@@ -296,16 +412,18 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
                         modelview_stack.push_back(modelview);
                     }
                     modelview = (params & 2) ? m : multiply(m, modelview);
+                    lights_dirty = true;
                 }
                 combined_dirty = true;
                 break;
             }
             case 0xD8: {  // G_POPMTX: w1 bytes of matrices
-                for (uint32_t n = w1 / 64; n > 0 && !modelview_stack.empty(); n--) {
+                for (uint32_t k = w1 / 64; k > 0 && !modelview_stack.empty(); k--) {
                     modelview = modelview_stack.back();
                     modelview_stack.pop_back();
                 }
                 combined_dirty = true;
+                lights_dirty = true;
                 break;
             }
             case 0xDC:  // G_MOVEMEM
@@ -317,41 +435,99 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
                         vp_trans_x = half(rdram, vp + 8) / 4.0f;
                         vp_trans_y = half(rdram, vp + 10) / 4.0f;
                     }
+                } else {
+                    lights_dirty = true;  // a light, most likely
                 }
                 break;
             case 0xD9:  // G_GEOMETRYMODE: keep the bits in w0's mask, then set w1's
                 geometry = (geometry & (w0 | 0xFF000000u)) | w1;
-                zbuffer = (geometry & 1u) != 0;
                 break;
-            case 0xE3: {  // G_SETOTHERMODE_H
-                const uint32_t shift = 32 - ((w0 >> 8) & 0xFF) - ((w0 & 0xFF) + 1);
+            case 0xE2: {  // G_SETOTHERMODE_L
                 const uint32_t length = (w0 & 0xFF) + 1;
+                const uint32_t shift = 32 - ((w0 >> 8) & 0xFF) - length;
+                const uint32_t mask = (length >= 32 ? 0xFFFFFFFFu : ((1u << length) - 1)) << shift;
+                othermode_l = (othermode_l & ~mask) | (w1 & mask);
+                break;
+            }
+            case 0xE3: {  // G_SETOTHERMODE_H
+                const uint32_t length = (w0 & 0xFF) + 1;
+                const uint32_t shift = 32 - ((w0 >> 8) & 0xFF) - length;
                 if (shift <= 20 && shift + length > 20) {
                     cycle_type = (w1 >> 20) & 3;
                 }
                 break;
             }
-            case 0xEF:  // G_RDPSETOTHERMODE: w0 carries othermode-hi
+            case 0xEF:  // G_RDPSETOTHERMODE: w0 othermode-hi, w1 othermode-lo
                 cycle_type = (w0 >> 20) & 3;
+                othermode_l = w1;
                 break;
-            case 0xF6: {  // G_FILLRECT, 10.2 fixed point, inclusive in fill mode
+            case 0xE7:  // G_RDPPIPESYNC
+                n.syncs++;
+                rdp += rdp_sync_pipe;
+                break;
+            case 0xE8:  // G_RDPTILESYNC
+                n.syncs++;
+                rdp += rdp_sync_tile;
+                break;
+            case 0xE6:  // G_RDPLOADSYNC
+                n.syncs++;
+                rdp += rdp_sync_load;
+                break;
+            case 0xFD:  // G_SETTIMG
+                image_size = (w0 >> 19) & 3;
+                break;
+            case 0xFF:  // G_SETCIMG
+                color_size = (w0 >> 19) & 3;
+                break;
+            case 0xF3: {  // G_LOADBLOCK: lrs is the texel count minus one
+                const double texels = ((w1 >> 12) & 0xFFF) + 1;
+                const double bytes = texels * (image_size == 0 ? 0.5 : double(1u << (image_size - 1)));
+                n.texture_bytes += bytes;
+                rdp += bytes / rdp_bytes_per_cycle;
+                break;
+            }
+            case 0xF4: {  // G_LOADTILE: 10.2 fixed-point corners
+                const double width = (((w1 >> 12) & 0xFFF) - ((w0 >> 12) & 0xFFF)) / 4.0 + 1;
+                const double height = ((w1 & 0xFFF) - (w0 & 0xFFF)) / 4.0 + 1;
+                const double bytes = std::max(0.0, width) * std::max(0.0, height) *
+                                     (image_size == 0 ? 0.5 : double(1u << (image_size - 1)));
+                n.texture_bytes += bytes;
+                rdp += bytes / rdp_bytes_per_cycle;
+                break;
+            }
+            case 0xF0: {  // G_LOADTLUT: count in the lrs field, 16-bit entries
+                const double bytes = (((w1 >> 14) & 0x3FF) + 1) * 2.0;
+                n.texture_bytes += bytes;
+                rdp += bytes / rdp_bytes_per_cycle;
+                break;
+            }
+            case 0xF6: {  // G_FILLRECT, 10.2 fixed point, inclusive in fill and copy mode
                 const double lrx = ((w0 >> 12) & 0xFFF) / 4.0, lry = (w0 & 0xFFF) / 4.0;
                 const double ulx = ((w1 >> 12) & 0xFFF) / 4.0, uly = (w1 & 0xFFF) / 4.0;
-                const double area = std::max(0.0, lrx - ulx + 1) * std::max(0.0, lry - uly + 1);
-                rdp_cycles += area * ((cycle_type == 3) ? rdp_per_pixel_fill : pixel_cost());
+                const double inclusive = cycle_type >= 2 ? 1 : 0;
+                const double rows = std::max(0.0, lry - uly + inclusive);
+                n.spans += rows;
+                rdp += rows * rdp_span;
+                count_pixels(std::max(0.0, lrx - ulx + inclusive) * rows, true);
                 break;
             }
             case 0xE4: {  // G_TEXRECT, followed by two RDPHALF words
                 const double lrx = ((w0 >> 12) & 0xFFF) / 4.0, lry = (w0 & 0xFFF) / 4.0;
                 const double ulx = ((w1 >> 12) & 0xFFF) / 4.0, uly = (w1 & 0xFFF) / 4.0;
-                const double area = std::max(0.0, lrx - ulx) * std::max(0.0, lry - uly);
-                rdp_cycles += area * ((cycle_type == 2) ? rdp_per_pixel_copy : pixel_cost());
+                const double inclusive = cycle_type >= 2 ? 1 : 0;
+                const double rows = std::max(0.0, lry - uly + inclusive);
+                n.spans += rows;
+                rdp += rows * rdp_span;
+                count_pixels(std::max(0.0, lrx - ulx + inclusive) * rows, true);
                 pc += 16;
                 break;
             }
             case 0xDB:  // G_MOVEWORD
                 if (((w0 >> 16) & 0xFF) == 0x06) {  // G_MW_SEGMENT
                     segment[((w0 & 0xFFFF) / 4) & 0xF] = w1 & 0x00FFFFFFu;
+                } else if (((w0 >> 16) & 0xFF) == 0x02) {  // G_MW_NUMLIGHT: 24 bytes a light
+                    lights = w1 / 24;
+                    lights_dirty = true;
                 }
                 break;
             case 0xDE:  // G_DL: 0 pushes a return, 1 is a plain branch
@@ -372,7 +548,10 @@ extern "C" double knife_edge_estimate_frame_ms(uint8_t* rdram, uint32_t display_
                 break;
         }
     }
-    const double cycles = std::max(rsp_cycles, rdp_cycles);
-    last_culled_fraction = triangles_total > 0 ? triangles_culled / triangles_total : 0;
-    return cycles / rcp_hz * 1000.0;
+    n.rsp_ms = rsp / rcp_hz * 1000.0;
+    n.rdp_ms = rdp / rcp_hz * 1000.0;
+    last_counts = n;
+    // The microcode feeds the RDP through a FIFO, so the two overlap and the
+    // task takes about as long as the slower of them.
+    return std::max(n.rsp_ms, n.rdp_ms);
 }

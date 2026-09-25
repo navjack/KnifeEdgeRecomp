@@ -1480,3 +1480,24 @@ text = "knife_edge_comm_probe(rdram, ctx, 0x800C8544);"
 func = "ovl_1501A0_func_8019743C"
 before_vram = 0x8019743C
 text = "knife_edge_comm_probe(rdram, ctx, 0x8019743C);"
+
+[[patches.hook]]
+# osEPiStartDma call in the loader func_800D1D10: cartridge bytes for the pacing model.
+func = "func_800D1D10"
+before_vram = 0x800D1D68
+text = "knife_edge_dma_probe(rdram, ctx, 0x800D1D68);"
+
+[[patches.hook]]
+# osEPiStartDma call in func_800CD8C0.
+func = "func_800CD8C0"
+before_vram = 0x800CDA50
+text = "knife_edge_dma_probe(rdram, ctx, 0x800CDA50);"
+
+[[patches.hook]]
+# The transmission box's 59.7 ms hold: `while (osGetTime() < 0x2AB980)`. The
+# spin scanner passes loops that call an os* function, but osGetTime never
+# yields, so this spun a host core and its turns counted as step work. As a poll
+# site its turns are idle, and other guest threads run while it waits.
+func = "ovl_1501A0_func_801978C0"
+before_vram = 0x80197B18
+text = "knife_edge_guest_poll_site(rdram, ctx, 0x80197B18);"

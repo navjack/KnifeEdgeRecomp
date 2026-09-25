@@ -28,6 +28,8 @@
 
 #include "cpu_cost.h"
 #include "rdp_model.h"
+
+extern "C" void knife_edge_dma_take(uint64_t* step_bytes, uint64_t* other_bytes);
 #include "recomp.h"
 
 namespace {
@@ -145,10 +147,8 @@ std::atomic<int> gfx_tasks_started{0};
 std::atomic<long long> gfx_tasks_total{0};
 
 struct FrameEstimate {
-    double draw_ms;
-    double cpu_ms;
+    double rsp_ms, rdp_ms, cpu_ms, host_ms;
     int retraces;
-    double culled;
 };
 std::vector<FrameEstimate>& frame_estimates() {
     static std::vector<FrameEstimate> all;
@@ -302,18 +302,67 @@ void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
             step_costs().push_back(step_work);
         }
         last_work = work;
-        // KNIFE_EDGE_RDP_MODEL=1: pace each frame by what a real N64 would have
-        // needed to draw it, or by the step's CPU work if that is slower (a CPI
-        // of 1.5 at 93.75 MHz; the pipeline overlaps the two, so the slower wins).
+        // KNIFE_EDGE_RDP_MODEL=1: pace each frame as the console would have.
+        // The step runs from the retrace callback and only once the previous
+        // task is done, so a frame is the step's CPU time and then the RCP's
+        // drawing time, in series, rounded up to a retrace. The CPU time is
+        // guest instructions the step itself ran -- counted from the retrace
+        // that let it run to this submission, spinning excluded -- at
+        // KNIFE_EDGE_MODEL_CPI cycles each
+        // (default 1.5, an assumption) at 93.75 MHz -- or the host time the
+        // step really took, if longer: the transmission box waits on the
+        // clock for 59.7 ms, and that wait is real on hardware too.
         static const bool model = std::getenv("KNIFE_EDGE_RDP_MODEL") != nullptr;
+        knife_edge_step_submitted();
         if (model) {
+            static const double cpi = [] {
+                const char* text = std::getenv("KNIFE_EDGE_MODEL_CPI");
+                return text != nullptr ? std::atof(text) : 1.5;
+            }();
             const double draw_ms = knife_edge_estimate_frame_ms(rdram, static_cast<uint32_t>(data_ptr));
-            const double cpu_ms = static_cast<double>(step_work) * 1.5 / 93750.0;
-            const double frame_ms = std::max(draw_ms, cpu_ms);
+            const uint64_t own_work = knife_edge_step_work_so_far();
+            const double cpu_ms = static_cast<double>(own_work) * cpi / 93750.0;
+            const double host_ms = knife_edge_ms_since_step_start();
+            // Cartridge reads block the thread that asked for them. The PI
+            // moves a 2^(PGS+2)-byte page in (LAT+1) + words * (PWD+1 + RLS+1)
+            // RCP cycles (n64brew, Peripheral Interface); this cartridge's
+            // header sets LAT 0x40, PWD 0x12, PGS 7, RLS 3: 5.4 MB/s.
+            constexpr double pi_page_bytes = 512, pi_page_cycles = 0x41 + 256 * (0x13 + 0x4);
+            constexpr double pi_bytes_per_ms = pi_page_bytes / pi_page_cycles * 62.5e3;
+            uint64_t dma_step = 0, dma_other = 0;
+            knife_edge_dma_take(&dma_step, &dma_other);
+            const double dma_ms = static_cast<double>(dma_step) / pi_bytes_per_ms;
+            const double frame_ms = std::max(cpu_ms + dma_ms, host_ms) + draw_ms;
             const int retraces = std::max(1, static_cast<int>(std::ceil(frame_ms / (1000.0 / 60.0))));
             knife_edge_rdp_set_frame_retraces(retraces);
-            std::lock_guard<std::mutex> held(step_costs_lock);
-            frame_estimates().push_back({draw_ms, cpu_ms, retraces, knife_edge_last_culled_fraction()});
+            const FrameCounts& n = *knife_edge_last_frame_counts();
+            {
+                std::lock_guard<std::mutex> held(step_costs_lock);
+                frame_estimates().push_back({n.rsp_ms, n.rdp_ms, cpu_ms + dma_ms, host_ms, retraces});
+            }
+            // KNIFE_EDGE_RDP_MODEL_CSV=<file>: the raw counts, one row a frame,
+            // so the model's assumed costs can be varied without a rebuild.
+            static FILE* csv = [] {
+                const char* path = std::getenv("KNIFE_EDGE_RDP_MODEL_CSV");
+                FILE* file = path != nullptr ? std::fopen(path, "w") : nullptr;
+                if (file != nullptr) {
+                    std::fprintf(file, "gfx,step_instructions,host_ms,commands,rdp_commands,matrices,syncs,vertices,"
+                                       "vertices_lit,light_xfrms,tris_drawn,tris_backface,tris_offscreen,tris_clipped,"
+                                       "tris_degenerate,px_1c,px_1c_z,px_2c,px_2c_z,px_fill,px_copy,spans,texture_bytes,"
+                                       "rsp_ms,rdp_ms,cpu_ms,dma_step_bytes,dma_other_bytes,retraces\n");
+                }
+                return file;
+            }();
+            if (csv != nullptr) {
+                std::fprintf(csv, "%lld,%llu,%.2f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,"
+                                  "%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.3f,%.3f,%.3f,%llu,%llu,%d\n",
+                             gfx_task, static_cast<unsigned long long>(own_work), host_ms, n.commands, n.rdp_commands,
+                             n.matrices, n.syncs, n.vertices, n.vertices_lit, n.light_xfrms, n.tris_drawn,
+                             n.tris_backface, n.tris_offscreen, n.tris_clipped, n.tris_degenerate, n.px_1c, n.px_1c_z,
+                             n.px_2c, n.px_2c_z, n.px_fill, n.px_copy, n.spans, n.texture_bytes, n.rsp_ms, n.rdp_ms,
+                             cpu_ms, static_cast<unsigned long long>(dma_step),
+                             static_cast<unsigned long long>(dma_other), retraces);
+            }
         }
     }
     if (type == 1 && !dump_indices().empty()) {
@@ -714,21 +763,28 @@ extern "C" void knife_edge_cpu_cost_totals(void) {
     std::sort(tail.begin(), tail.end());
     const auto tail_at = [&](double q) { return tail[static_cast<size_t>(q * (tail.size() - 1))]; };
     if (!frame_estimates().empty()) {
-        std::vector<double> draw, cpu, culled;
+        std::vector<double> rsp, rdp, cpu, frame;
         int histogram[5] = {};
+        long long retraces = 0;
         for (const FrameEstimate& e : frame_estimates()) {
-            draw.push_back(e.draw_ms);
-            cpu.push_back(e.cpu_ms);
-            culled.push_back(e.culled);
+            rsp.push_back(e.rsp_ms);
+            rdp.push_back(e.rdp_ms);
+            cpu.push_back(std::max(e.cpu_ms, e.host_ms));
+            frame.push_back(std::max(e.cpu_ms, e.host_ms) + std::max(e.rsp_ms, e.rdp_ms));
             histogram[std::min(e.retraces, 4)]++;
+            retraces += e.retraces;
         }
-        std::sort(draw.begin(), draw.end());
-        std::sort(cpu.begin(), cpu.end());
+        for (auto* v : {&rsp, &rdp, &cpu, &frame}) {
+            std::sort(v->begin(), v->end());
+        }
         const auto q = [](const std::vector<double>& v, double f) { return v[static_cast<size_t>(f * (v.size() - 1))]; };
-        std::fprintf(stderr, "[model] %zu frames: draw ms median %.1f p90 %.1f max %.1f; cpu ms median %.1f p90 %.1f; "
-                     "retraces per frame 1:%d 2:%d 3:%d 4+:%d; culled median %.0f%%\n", draw.size(), q(draw, 0.5), q(draw, 0.9),
-                     draw.back(), q(cpu, 0.5), q(cpu, 0.9), histogram[1], histogram[2], histogram[3], histogram[4],
-                     [&] { std::sort(culled.begin(), culled.end()); return q(culled, 0.5) * 100; }());
+        std::fprintf(stderr, "[model] %zu frames, ms median/p90/max: rsp %.1f/%.1f/%.1f rdp %.1f/%.1f/%.1f "
+                     "cpu %.1f/%.1f/%.1f frame %.1f/%.1f/%.1f\n", frame.size(), q(rsp, 0.5), q(rsp, 0.9), rsp.back(),
+                     q(rdp, 0.5), q(rdp, 0.9), rdp.back(), q(cpu, 0.5), q(cpu, 0.9), cpu.back(), q(frame, 0.5),
+                     q(frame, 0.9), frame.back());
+        std::fprintf(stderr, "[model] retraces per frame 1:%d 2:%d 3:%d 4+:%d; average %.1f frames a second\n",
+                     histogram[1], histogram[2], histogram[3], histogram[4],
+                     60.0 * static_cast<double>(frame.size()) / static_cast<double>(retraces));
     }
     std::fprintf(stderr, "[cpu] last %zu steps: median %llu, p90 %llu, p99 %llu, max %llu\n", tail.size(),
                  (unsigned long long)tail_at(0.5), (unsigned long long)tail_at(0.9),
@@ -767,4 +823,31 @@ extern "C" void knife_edge_comm_probe(uint8_t* rdram, recomp_context* ctx, uint3
     std::copy(now, now + 5, last);
     std::fprintf(stderr, "[comm] %.3f gfx %lld tick state %u offset 0x%X code 0x%04X pause %u speaker %u\n",
                  wall_ms, gfx_tasks_total.load(), state, offset, code, pause, speaker);
+}
+
+// Cartridge DMA, for the pacing model. The game's only two osEPiStartDma call
+// sites (func_800D1D10's loader and func_800CD8C0) are hooked at the call; the
+// OSIoMesg in a1 holds the size at 0x10. Bytes are split by whether they were
+// requested during the current step (between the retrace that let it run and
+// its graphics task) or by another thread.
+namespace {
+std::atomic<uint64_t> dma_step_bytes{0};
+std::atomic<uint64_t> dma_other_bytes{0};
+std::atomic<uint64_t> dma_total_bytes{0};
+}  // namespace
+
+extern "C" void knife_edge_dma_probe(uint8_t* rdram, recomp_context* ctx, uint32_t site) {
+    (void)site;
+    const uint32_t size = static_cast<uint32_t>(MEM_W(0x10, ctx->r5));
+    dma_total_bytes += size;
+    if (knife_edge_in_step()) {
+        dma_step_bytes += size;
+    } else {
+        dma_other_bytes += size;
+    }
+}
+
+extern "C" void knife_edge_dma_take(uint64_t* step_bytes, uint64_t* other_bytes) {
+    *step_bytes = dma_step_bytes.exchange(0);
+    *other_bytes = dma_other_bytes.exchange(0);
 }
