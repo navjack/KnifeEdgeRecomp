@@ -497,6 +497,26 @@ void init_config() {
         general.set_option_value(recompui::config::general::options::joystick_deadzone, 0.0);
         general.save_config();
     }
+
+    // Authentic presentation: 4:3, the game's own refresh (no interpolated
+    // frames), native resolution and no multisampling -- forced every launch,
+    // over whatever graphics.json holds, and hidden so nothing drifts back.
+    // Beyond being the chosen look, MSAA must stay off for correctness: RT64's
+    // MSAA resolve (rt64_workload_queue.cpp, `overrideTarget->resize(...,
+    // colorTarget->width, ...)`) dereferences a null colour target when the
+    // selected framebuffer pair has none, which a skipped frame produces, and
+    // this game skips frames whenever drawing runs long.
+    namespace gfx = recompui::config::graphics::options;
+    recomp::config::Config& graphics_config = recompui::config::get_config(recompui::config::graphics::id);
+    graphics_config.set_option_value(gfx::ar_option, static_cast<uint32_t>(ultramodern::renderer::AspectRatio::Original));
+    graphics_config.set_option_value(gfx::rr_option, static_cast<uint32_t>(ultramodern::renderer::RefreshRate::Original));
+    graphics_config.set_option_value(gfx::msaa_option, static_cast<uint32_t>(ultramodern::renderer::Antialiasing::None));
+    graphics_config.set_option_value(gfx::res_option, static_cast<uint32_t>(ultramodern::renderer::Resolution::Original));
+    for (const std::string* option : {&gfx::ar_option, &gfx::rr_option, &gfx::rr_manual_value,
+                                      &gfx::msaa_option, &gfx::res_option, &gfx::hr_option, &gfx::ds_option}) {
+        graphics_config.update_option_hidden(*option, true);
+    }
+    graphics_config.save_config();
 }
 
 void register_launcher() {

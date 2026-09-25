@@ -118,12 +118,13 @@ extern "C" void knife_edge_guest_poll_site(uint8_t* rdram, recomp_context* ctx,
     // costs microseconds per turn instead of up to a millisecond, which is
     // what turned one misclassified list walk into a game-wide crawl.
     using clock = std::chrono::steady_clock;
-    thread_local uint32_t spin_site = 0;
     thread_local clock::time_point spin_first{};
     thread_local clock::time_point spin_last{};
     const clock::time_point now = clock::now();
-    if (site != spin_site || now - spin_last > std::chrono::microseconds{500}) {
-        spin_site = site;
+    // Keyed on the thread and time, not the site: the gameplay wait alternates
+    // between two hooked branches, and resetting on every change of site meant
+    // it never counted as spinning and held a core at 100%.
+    if (now - spin_last > std::chrono::microseconds{500}) {
         spin_first = now;
     }
     spin_last = now;
