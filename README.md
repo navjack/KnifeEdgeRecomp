@@ -10,24 +10,20 @@ frontend.
 
 ## Current state
 
-**Scaffolding only.** No native binary exists yet. The full execution record and
-the next gate are in [`RECOMP_STATUS.md`](RECOMP_STATUS.md), and everything read
-out of the ROM so far is in [`docs/ROM_ANALYSIS.md`](docs/ROM_ANALYSIS.md).
+**Playable.** The packaged app boots straight into the game, and stage 1 plays
+through its boss with a gamepad and rumble. Presentation is the original's
+(4:3, no enhancements). Pacing matches a real console to within about 2%
+across the attract loop and stage 1. See [`docs/PACING.md`](docs/PACING.md).
+The execution record is in [`RECOMP_STATUS.md`](RECOMP_STATUS.md), and what was
+read out of the ROM is in [`docs/ROM_ANALYSIS.md`](docs/ROM_ANALYSIS.md).
 
-What is established:
+What is not yet established:
 
-- the ROM is fingerprinted, and every script refuses to run against any other dump;
-- the boot stub is decoded, so the entry, text, data and BSS boundaries are
-  exact rather than guessed;
-- the graphics microcode is identified as stock F3DEX2 2.05, which RT64 already
-  supports unpatched;
-- the shared upstream stack is pinned and patched reproducibly.
-
-What is not:
-
-- no reviewed symbol map, so no generated code;
-- no audio microcode located;
-- no save type determined.
+- the symbol map is still the unreviewed candidate (`decomp/`), not a reviewed
+  `input/` map;
+- stages after the first, and every boss beyond stage 1's, have not been
+  checked against hardware;
+- no save type is determined (`SAVE_TYPE` is `None`).
 
 ## Layout
 
@@ -89,6 +85,23 @@ Development flags carried over from the shared frontend:
 | `--trace-output FILE` | Per-VI CSV of VI count, audio frequency, buffers and nonzero samples. |
 | `--function-trace-output FILE` | Function entry/return log. Needs `trace_mode = true` in `config/recomp-symbols.toml`. |
 | `--stop-after-vi N` | Quit cleanly after N guest VIs, for bounded unattended runs. |
+| `--launcher` | Keep the launcher up instead of starting the game. |
+
+Environment variables, all for development:
+
+| Variable | Effect |
+| --- | --- |
+| `KNIFE_EDGE_RDP_VIS=N` | Fixed pacing, N retraces a frame, in place of the hardware model. |
+| `KNIFE_EDGE_RDP_MODEL=0` / `measure` | Turn the pacing model off, or record without pacing. |
+| `KNIFE_EDGE_RDP_MODEL_CSV=FILE` | Per-frame raw counts: triangles, pixels by mode, bytes, spans, CPU. |
+| `KNIFE_EDGE_MODEL_CPI` / `_BW` / `_SPAN` | Override the fitted CPU and RDP costs. |
+| `KNIFE_EDGE_MODEL_TRACE=N` | Print graphics task N's rectangles and image settings. |
+| `KNIFE_EDGE_COMM_LOG=1` | Transmission states, sound calls and frame-callback changes, timestamped. |
+| `KNIFE_EDGE_AUDIO_LOG=FILE` / `KNIFE_EDGE_DUMP_AUDIO=FILE` | Per-buffer audio queue log, raw guest audio. |
+| `KNIFE_EDGE_DUMP_RDRAM=DIR:N,...` | Guest-order RDRAM at the given graphics tasks. |
+| `KNIFE_EDGE_POKE=ADDR=VALUE,...` | Rewrite guest words every VI (test harness, e.g. pin health). |
+| `KNIFE_EDGE_SCRIPT_UNTIL_LEVEL=1` | Stop `--input-script` input once a level starts. |
+| `KNIFE_EDGE_SESSION_LOG=1` | Log to `~/Library/Logs/KnifeEdge/` with a hang sampler (on by default from Finder). |
 
 ## Pinned upstreams
 

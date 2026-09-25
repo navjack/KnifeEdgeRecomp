@@ -2,6 +2,41 @@
 
 Updated 2026-09-24.
 
+## Current gate (2026-09-25): playable, paced like the console
+
+Stage 1 plays through its boss on a gamepad, with rumble and correct
+rendering. The pacing is checked against a real-hardware longplay:
+- the title and story are within 2.2%;
+- the opening transmission is within 0.5%;
+- stage 1's rail between transmissions is within 0.6%.
+
+The work that got here, each piece with its evidence:
+
+- **Spin.** Scripted objects spun because the map cut
+  `ovl_02FC30_func_8016F7F8` off before its divide.
+  `tools/epilogue-audit/find_falloff.py` closes extents under control flow.
+- **Clock.** libultra rebases `osGetTime` only at retraces. The
+  transmission's `osSetTime(0)` / `osGetTime() < 2,800,000` hold therefore
+  snaps to 3 retraces on hardware. `native/game/clock.cpp` replaces the game's
+  `osSetTime` to match (43.4 s became 36.30 s; hardware takes 36.35 s).
+- **Pacing.** The game steps only when no task is pending and scales nothing
+  by time. `native/game/rdp_model.cpp` estimates each frame's CPU, RSP and RDP
+  time. Three costs are fitted to the footage: CPI 4.5, RDP bandwidth 92 MB/s,
+  36 cycles a span. Method and numbers are in [`docs/PACING.md`](docs/PACING.md).
+- **Presentation.** Forced to the original (4:3, no MSAA, no interpolation).
+  RT64's MSAA resolve also crashed on skipped frames.
+- **Menus and input.** Wait loops that never call into the OS are hooked
+  (`tools/spin-scan`). Loops that do call the OS are fine unless the call is
+  `osGetTime`, which never yields: the transmission's wait is hooked by hand.
+  `osContGetReadData`, `osMotorInit` and `__osMotorAccess` are bound or
+  replaced.
+
+Next:
+1. Check stages 2–6 and their bosses against the longplay with the same
+   method, starting with anything scripted on a rail.
+2. Review the candidate map into `input/` (still the long pole).
+3. Settle the save type.
+
 ## Completed
 
 - Workspace scaffolded: ROM manifest, Splat segmentation, three N64Recomp

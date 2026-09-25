@@ -1,0 +1,12 @@
+{
+  "_comment": "Measured by hand from the hardware longplay (1280x720, 30 fps, 4046 s; YouTube 1aDxy6BKbJ0, 'Knife Edge: Nose Gunner (N64) - 01 Longplay'). Times are seconds into the video. See docs/PACING.md for how each was found.",
+  "title":  {"start": 5.05, "end": 36.5, "port_gfx": [90, 452]},
+  "story":  {"start": 36.5, "end": 175.05, "port_gfx": [453, 4271]},
+  "stage1_between_transmissions": {
+    "start": 255.0,
+    "end": 421.70,
+    "pauses": [[314.60, 317.93], [345.80, 348.97]],
+    "port_steps": 4404
+  },
+  "stage1_opening_transmission": {"start": 218.65, "end": 255.0}
+}
