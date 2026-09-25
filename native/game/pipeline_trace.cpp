@@ -13,6 +13,7 @@
 // hits -- the interesting question is whether a step happens at all, and an
 // unbounded log of a 60 Hz pipeline drowns it.
 #include <atomic>
+#include <execinfo.h>
 #include <cstring>
 #include <cmath>
 #include <set>
@@ -539,12 +540,27 @@ extern "C" void knife_edge_rot_probe(uint8_t* rdram, recomp_context* ctx, uint32
         std::memcpy(&value, &bits, sizeof(value));
         return value;
     };
-    std::fprintf(stderr, "[rot] frame %d fn 0x%08X dest 0x%08X a1 %g a2 %g a3 %g sp10 %g sp14 %g (a1 raw 0x%08X)\n",
-                 gfx_tasks_started.load(), fn, dest, as_float(static_cast<uint32_t>(ctx->r5)),
+    std::fprintf(stderr, "[rot] frame %d site 0x%08X fn 0x%08X dest 0x%08X a1 %g a2 %g a3 %g sp10 %g sp14 %g (a1 raw 0x%08X)\n",
+                 gfx_tasks_started.load(), f2l_site.load(), fn, dest, as_float(static_cast<uint32_t>(ctx->r5)),
                  as_float(static_cast<uint32_t>(ctx->r6)), as_float(static_cast<uint32_t>(ctx->r7)),
                  as_float(static_cast<uint32_t>(MEM_W(0x10, ctx->r29))),
                  as_float(static_cast<uint32_t>(MEM_W(0x14, ctx->r29))),
                  static_cast<uint32_t>(ctx->r5));
+    // Every recompiled function is a native function with its name in the
+    // binary, so the native stack names the guest caller chain directly --
+    // including callers reached through function pointers, which no jal scan
+    // can find. Once per frame, for the delta built on the stack.
+    static int traced_frame = -1;
+    if (delta && traced_frame != gfx_tasks_started.load()) {
+        traced_frame = gfx_tasks_started.load();
+        void* frames[16];
+        const int count = backtrace(frames, 16);
+        char** symbols = backtrace_symbols(frames, count);
+        for (int i = 0; i < count && symbols != nullptr; i++) {
+            std::fprintf(stderr, "[rot]   #%d %s\n", i, symbols[i]);
+        }
+        std::free(symbols);
+    }
 }
 
 // guMtxCatF (func_800D6F30) writes its product through a2, and guMtxIdentF
@@ -574,6 +590,15 @@ extern "C" void knife_edge_cat_probe(uint8_t* rdram, recomp_context* ctx, uint32
         std::fprintf(stderr, "[cat] frame %d dest 0x%08X a0 0x%08X %s  a1 0x%08X %s\n",
                      gfx_tasks_started.load(), dest, static_cast<uint32_t>(ctx->r4),
                      row(ctx->r4).c_str(), static_cast<uint32_t>(ctx->r5), row(ctx->r5).c_str());
+        if (spinner) {
+            void* frames[8];
+            const int count = backtrace(frames, 8);
+            char** symbols = backtrace_symbols(frames, count);
+            for (int i = 1; i < count && i < 5 && symbols != nullptr; i++) {
+                std::fprintf(stderr, "[cat]   #%d %s\n", i, symbols[i]);
+            }
+            std::free(symbols);
+        }
     } else {
         std::fprintf(stderr, "[cat] frame %d ident 0x%08X\n", gfx_tasks_started.load(), dest);
     }

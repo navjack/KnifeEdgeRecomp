@@ -621,3 +621,240 @@ func = "func_800D2930"
 before_vram = 0x800D29EC
 text = "knife_edge_rdp_gate_before(rdram, ctx);"
 
+
+# Tag every guRotateF (func_800D7120) call site, read by knife_edge_rot_probe.
+[[patches.hook]]
+func = "func_800C6144"
+before_vram = 0x800C63C8
+text = "knife_edge_f2l_site(0x800C63C8);"
+
+[[patches.hook]]
+func = "func_800C6144"
+before_vram = 0x800C6530
+text = "knife_edge_f2l_site(0x800C6530);"
+
+[[patches.hook]]
+func = "func_800C6144"
+before_vram = 0x800C65EC
+text = "knife_edge_f2l_site(0x800C65EC);"
+
+[[patches.hook]]
+func = "func_800D72B4"
+before_vram = 0x800D72E0
+text = "knife_edge_f2l_site(0x800D72E0);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80171A24"
+before_vram = 0x801729D0
+text = "knife_edge_f2l_site(0x801729D0);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80171A24"
+before_vram = 0x80172AF0
+text = "knife_edge_f2l_site(0x80172AF0);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80171A24"
+before_vram = 0x80172B28
+text = "knife_edge_f2l_site(0x80172B28);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80172F74"
+before_vram = 0x801734AC
+text = "knife_edge_f2l_site(0x801734AC);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_801736A0"
+before_vram = 0x80173750
+text = "knife_edge_f2l_site(0x80173750);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8017840C"
+before_vram = 0x80178610
+text = "knife_edge_f2l_site(0x80178610);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8017840C"
+before_vram = 0x801786E4
+text = "knife_edge_f2l_site(0x801786E4);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8017840C"
+before_vram = 0x80178724
+text = "knife_edge_f2l_site(0x80178724);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8017AEB4"
+before_vram = 0x8017BB04
+text = "knife_edge_f2l_site(0x8017BB04);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8017AEB4"
+before_vram = 0x8017BB94
+text = "knife_edge_f2l_site(0x8017BB94);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8017FF08"
+before_vram = 0x8017FF38
+text = "knife_edge_f2l_site(0x8017FF38);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8017FF94"
+before_vram = 0x8017FFC4
+text = "knife_edge_f2l_site(0x8017FFC4);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80180020"
+before_vram = 0x80180050
+text = "knife_edge_f2l_site(0x80180050);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_801812A0"
+before_vram = 0x801829EC
+text = "knife_edge_f2l_site(0x801829EC);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_801812A0"
+before_vram = 0x80182A38
+text = "knife_edge_f2l_site(0x80182A38);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_80184D74"
+before_vram = 0x80185560
+text = "knife_edge_f2l_site(0x80185560);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8018C870"
+before_vram = 0x8018CB90
+text = "knife_edge_f2l_site(0x8018CB90);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8018C870"
+before_vram = 0x8018CCF0
+text = "knife_edge_f2l_site(0x8018CCF0);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8018C870"
+before_vram = 0x8018CD48
+text = "knife_edge_f2l_site(0x8018CD48);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8018F2F8"
+before_vram = 0x8018F540
+text = "knife_edge_f2l_site(0x8018F540);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8018F2F8"
+before_vram = 0x8018F6A0
+text = "knife_edge_f2l_site(0x8018F6A0);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8019C1D0"
+before_vram = 0x8019C288
+text = "knife_edge_f2l_site(0x8019C288);"
+
+[[patches.hook]]
+func = "ovl_1501A0_func_8019C1D0"
+before_vram = 0x8019C30C
+text = "knife_edge_f2l_site(0x8019C30C);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801DBBF0"
+before_vram = 0x801DBC5C
+text = "knife_edge_f2l_site(0x801DBC5C);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801DBBF0"
+before_vram = 0x801DBCEC
+text = "knife_edge_f2l_site(0x801DBCEC);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801DBBF0"
+before_vram = 0x801DBD94
+text = "knife_edge_f2l_site(0x801DBD94);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801DBBF0"
+before_vram = 0x801DBE24
+text = "knife_edge_f2l_site(0x801DBE24);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801E2C60"
+before_vram = 0x801E2D7C
+text = "knife_edge_f2l_site(0x801E2D7C);"
+
+[[patches.hook]]
+func = "ovl_1B66F0_func_801E3184"
+before_vram = 0x801E33CC
+text = "knife_edge_f2l_site(0x801E33CC);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801DC320"
+before_vram = 0x801E0B70
+text = "knife_edge_f2l_site(0x801E0B70);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801DC320"
+before_vram = 0x801E0D5C
+text = "knife_edge_f2l_site(0x801E0D5C);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801DC320"
+before_vram = 0x801E1558
+text = "knife_edge_f2l_site(0x801E1558);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801DC320"
+before_vram = 0x801E1BC4
+text = "knife_edge_f2l_site(0x801E1BC4);"
+
+[[patches.hook]]
+func = "ovl_255660_func_801E359C"
+before_vram = 0x801E3834
+text = "knife_edge_f2l_site(0x801E3834);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016E454"
+before_vram = 0x8016E490
+text = "knife_edge_f2l_site(0x8016E490);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016E520"
+before_vram = 0x8016E5B0
+text = "knife_edge_f2l_site(0x8016E5B0);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016E520"
+before_vram = 0x8016E5E8
+text = "knife_edge_f2l_site(0x8016E5E8);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016E8B0"
+before_vram = 0x8016F404
+text = "knife_edge_f2l_site(0x8016F404);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016E8B0"
+before_vram = 0x8016F494
+text = "knife_edge_f2l_site(0x8016F494);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016FBBC"
+before_vram = 0x8017021C
+text = "knife_edge_f2l_site(0x8017021C);"
+
+[[patches.hook]]
+func = "ovl_02FC30_func_8016FBBC"
+before_vram = 0x80170268
+text = "knife_edge_f2l_site(0x80170268);"
+
+[[patches.hook]]
+func = "ovl_3EFDD0_func_801DB23C"
+before_vram = 0x801DB450
+text = "knife_edge_f2l_site(0x801DB450);"
+
+[[patches.hook]]
+func = "ovl_3EFDD0_func_801DB23C"
+before_vram = 0x801DB524
+text = "knife_edge_f2l_site(0x801DB524);"
+
