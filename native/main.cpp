@@ -23,6 +23,7 @@
 
 #include "game_config.hpp"
 #include "game/pipeline_trace.h"
+#include "game/clock.h"
 #include "game/guest_waits.h"
 #include "game/session_log.h"
 #include "librecomp/game.hpp"
@@ -317,7 +318,39 @@ void set_frequency(uint32_t frequency) {
     }
 }
 
+// KNIFE_EDGE_POKE=<vram>=<value>[,...]: rewrite guest words on every VI. A
+// test harness only -- e.g. pinning the ship's health (0x8011D464) so an
+// unattended run survives to a timeline marker. Never used in normal play.
+const std::vector<std::pair<uint32_t, uint32_t>>& pokes() {
+    static const std::vector<std::pair<uint32_t, uint32_t>> all = [] {
+        std::vector<std::pair<uint32_t, uint32_t>> out;
+        if (const char* spec = std::getenv("KNIFE_EDGE_POKE")) {
+            std::string text = spec;
+            for (size_t at = 0; at < text.size();) {
+                const size_t next = text.find(',', at);
+                const std::string item = text.substr(at, next - at);
+                const size_t eq = item.find('=');
+                if (eq != std::string::npos) {
+                    out.emplace_back(static_cast<uint32_t>(std::stoul(item.substr(0, eq), nullptr, 0)),
+                                     static_cast<uint32_t>(std::stoul(item.substr(eq + 1), nullptr, 0)));
+                }
+                at = next == std::string::npos ? text.size() : next + 1;
+            }
+        }
+        return out;
+    }();
+    return all;
+}
+
 void vi_callback() {
+    knife_edge_clock_vi();
+    if (!pokes().empty()) {
+        if (uint8_t* const rdram = watched_rdram.load(std::memory_order_relaxed)) {
+            for (const auto& [vram, value] : pokes()) {
+                *reinterpret_cast<uint32_t*>(rdram + (vram - 0x80000000u)) = value;
+            }
+        }
+    }
     recompinput::update_rumble();
     const uint64_t current_vi = vi_count.fetch_add(1) + 1;
     if (trace_file.is_open()) {

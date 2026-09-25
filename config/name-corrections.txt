@@ -88,12 +88,16 @@ bind 0x800DAF00 osContStartReadData
 # nothing about its body says it depends on something that no longer exists.
 bind 0x800D8A00 osEPiStartDma
 # The clock pair. osGetCount (mfc0 $v0, $9) recompiled reads cop0_regs[9], which
-# nothing ever writes, so it returns 0 forever. osSetTime recompiled writes the
-# game's own 0x8016A890, which the bound osGetTime never reads, so its reset has
-# no effect. Both sit in the same N64Recomp lists as the already-bound
-# osGetTime, and the runtime implements both. world-tour hit the frozen clock.
+# nothing ever writes, so it returns 0 forever. It sits in the same N64Recomp
+# lists as the already-bound osGetTime, and the runtime implements it.
+# world-tour hit the frozen clock.
 bind 0x800E0B50 osGetCount
-bind 0x800D7A20 osSetTime
+# osSetTime (0x800D7A20) is deliberately left unnamed: recompiled it writes the
+# game's own 0x8016A890, which the bound osGetTime never reads, and the runtime's
+# osSetTime resets the clock at the call, where libultra's leaves the time since
+# the last retrace in it. native/game/clock.cpp replaces it (ignored in
+# config/recomp-candidate.toml).
+deny 0x800D7A20 osSetTime
 # The game's osContGetReadData, 0x84 past osContStartReadData as in libultra's
 # contreaddata.c: reads __osMaxControllers (D_8016A721) and the PIF RAM buffer
 # (D_8016A6E0) into each pad's button/stick/errno. Recompiled, it reads guest

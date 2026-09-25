@@ -7,7 +7,7 @@ symbols_file_path = "../decomp/knife-edge.candidate.syms.toml"
 output_func_path = "../generated-candidate"
 entrypoint = 0x800C2400
 functions_per_output_file = 50
-recomp_include = "#include \"game/cpu_cost.h\"\n#include \"recomp.h\"\n#include \"game/overlay_bridge.h\"\n#include \"game/pipeline_trace.h\"\n#include \"game/guest_waits.h\"\n#include \"game/rumble.h\""
+recomp_include = "#include \"game/cpu_cost.h\"\n#include \"recomp.h\"\n#include \"game/overlay_bridge.h\"\n#include \"game/pipeline_trace.h\"\n#include \"game/guest_waits.h\"\n#include \"game/rumble.h\"\n#include \"game/clock.h\""
 uses_mips3_float_mode = false
 # relocatable_sections_path is deliberately NOT set.
 #
@@ -38,6 +38,10 @@ ignored = [
     # lists the name as reimplemented, but the runtime ships no
     # __osMotorAccess_recomp, so native/game/rumble.cpp forwards it instead.
     "func_800DB190",
+    # osSetTime: libultra's leaves the time since the last retrace in the
+    # clock, the runtime's does not, and the transmission box's hold depends on
+    # it. native/game/clock.cpp.
+    "func_800D7A20",
 ]
 
 stubs = [
@@ -1501,3 +1505,10 @@ text = "knife_edge_dma_probe(rdram, ctx, 0x800CDA50);"
 func = "ovl_1501A0_func_801978C0"
 before_vram = 0x80197B18
 text = "knife_edge_guest_poll_site(rdram, ctx, 0x80197B18);"
+
+[[patches.hook]]
+# func_800D1640(callback) installs the retrace frame callback: every game mode
+# change passes through it. Logged with KNIFE_EDGE_COMM_LOG as a timeline marker.
+func = "func_800D1640"
+before_vram = 0x800D1640
+text = "knife_edge_comm_probe(rdram, ctx, 0x800D1640);"
