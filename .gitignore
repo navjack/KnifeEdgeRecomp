@@ -34,3 +34,7 @@
 /tools/map-recovery/map-recovery
 /tools/recomp-boundary-audit/recomp-boundary-audit
 __pycache__/
+
+# Reference footage (hardware longplay) -- local only.
+*.mp4
+*.mov
