@@ -323,10 +323,12 @@ void knife_edge_pipeline_started(uint8_t* rdram, recomp_context* ctx) {
             const uint64_t own_work = knife_edge_step_work_so_far();
             const double cpu_ms = static_cast<double>(own_work) * cpi / 93750.0;
             const double host_ms = knife_edge_ms_since_step_start();
-            // Cartridge reads block the thread that asked for them. The PI
-            // moves a 2^(PGS+2)-byte page in (LAT+1) + words * (PWD+1 + RLS+1)
-            // RCP cycles (n64brew, Peripheral Interface); this cartridge's
-            // header sets LAT 0x40, PWD 0x12, PGS 7, RLS 3: 5.4 MB/s.
+            // Cartridge reads block the thread that asked for them. Taking the
+            // PI to move a 2^(PGS+2)-byte page in (LAT+1) + halfwords *
+            // (PWD+1 + RLS+1) RCP cycles -- the usual reading of the domain
+            // timing registers, not checked against hardware here -- this
+            // cartridge's header (LAT 0x40, PWD 0x12, PGS 7, RLS 3) gives
+            // 5.4 MB/s. Gameplay steps start no DMA, so this rarely matters.
             constexpr double pi_page_bytes = 512, pi_page_cycles = 0x41 + 256 * (0x13 + 0x4);
             constexpr double pi_bytes_per_ms = pi_page_bytes / pi_page_cycles * 62.5e3;
             uint64_t dma_step = 0, dma_other = 0;
