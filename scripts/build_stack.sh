@@ -105,11 +105,13 @@ apply_patch N64Recomp N64Recomp-zero-register-writes.patch \
 COMMON_ARGS="-G Ninja -DCMAKE_BUILD_TYPE=Release $PLATFORM_CMAKE_ARGS"
 
 # RT64 has always been built here with stdlib.h forced in; clang-cl spells the
-# forced include differently.
+# forced include differently. On Windows it goes through _INIT, which CMake
+# extends with its MSVC defaults: setting CMAKE_CXX_FLAGS outright would drop
+# /EHsc, and RT64's tools then fail with exceptions disabled.
 if [ "$HOST_OS" = windows ]; then
-    RT64_FORCE_INCLUDE=/FIstdlib.h
+    RT64_CXX_FLAGS_ARG=-DCMAKE_CXX_FLAGS_INIT=/FIstdlib.h
 else
-    RT64_FORCE_INCLUDE="-include stdlib.h"
+    RT64_CXX_FLAGS_ARG="-DCMAKE_CXX_FLAGS=-include stdlib.h"
 fi
 
 echo "Building N64Recomp"
@@ -133,7 +135,7 @@ fi
 
 echo "Building RT64"
 "$CMAKE_BIN" -S "$ROOT/upstream/rt64" -B "$ROOT/build/rt64" $COMMON_ARGS \
-    "-DCMAKE_CXX_FLAGS=$RT64_FORCE_INCLUDE" -DZSTD_BUILD_PROGRAMS=OFF -DZSTD_BUILD_TESTS=OFF
+    "$RT64_CXX_FLAGS_ARG" -DZSTD_BUILD_PROGRAMS=OFF -DZSTD_BUILD_TESTS=OFF
 "$CMAKE_BIN" --build "$ROOT/build/rt64" --parallel "$JOBS"
 
 case "$HOST_OS" in
