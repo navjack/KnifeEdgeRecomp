@@ -8,6 +8,16 @@ the Cruis'n workspace took: recover the metadata N64Recomp needs from the ROM
 itself, then build a native app against N64ModernRuntime, RT64 and the recomp
 frontend.
 
+## No game data
+
+This repository contains no ROM, no game code and no game assets. What is
+committed is the port's own code, the build tooling, and factual metadata
+recovered from the ROM: segment boundaries, function addresses and sizes.
+Everything derived from the game itself -- the recompiled C in `generated/`, the
+recompiled audio microcode, the split disassembly -- is produced on your machine
+from your own dump of the USA cartridge, whose SHA-256 is checked before
+anything runs.
+
 ## Current state
 
 **Playable.** The packaged app boots straight into the game, and stage 1 plays
@@ -117,3 +127,12 @@ Revisions and patch fingerprints are in [`UPSTREAM_PINS.txt`](UPSTREAM_PINS.txt)
 Each recomp project builds and uses **its own** N64Recomp. Sharing another
 project's binary appears to work and then fails much later, when the generated
 code is compiled against a runtime API it was not built for.
+
+## License
+
+GPL-3.0 (see [`LICENSE`](LICENSE)), matching N64ModernRuntime, which the app
+links. The bundled fonts keep their own licenses: Inter, Noto Emoji and
+PromptFont are all under the SIL Open Font License 1.1.
+
+*Knife Edge: Nose Gunner* belongs to its rights holders. This project is not
+affiliated with or endorsed by them.
