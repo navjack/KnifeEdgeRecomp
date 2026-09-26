@@ -147,7 +147,7 @@ test -x "$ROOT/build/N64Recomp/RSPRecomp$EXE"
 test -f "$(static_lib "$ROOT/build/N64ModernRuntime/ultramodern" ultramodern)"
 test -f "$(static_lib "$ROOT/build/N64ModernRuntime/librecomp" librecomp)"
 if [ "$HOST_OS" = macos ]; then
-    test -f "$(static_lib "$ROOT/build/libultraship/src" libultraship)"
+    test -f "$(static_lib "$ROOT/build/libultraship/src" ultraship)"
 fi
 test -f "$ROOT/build/rt64/$RT64_LIBRARY"
 
