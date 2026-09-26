@@ -17,9 +17,9 @@ for required in funcs.h lookup.cpp recomp_overlays.inl; do
     fi
 done
 
-RSP_SOURCES=$(find "$ROOT/rsp" -type f \( -name '*.c' -o -name '*.cpp' \) | wc -l | tr -d ' ')
-if [ "$RSP_SOURCES" -eq 0 ]; then
-    echo "Title-specific RSP sources are missing: $ROOT/rsp"
+"$SCRIPT_DIR/generate_rsp.sh"
+if [ ! -f "$ROOT/rsp/aspMain.cpp" ]; then
+    echo "Recompiled RSP microcode is missing: $ROOT/rsp/aspMain.cpp"
     echo "The app must not run with an empty RSP implementation; see rsp/README.md."
     exit 2
 fi

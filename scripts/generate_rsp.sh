@@ -1,10 +1,10 @@
 #!/bin/sh
 # Regenerates the recompiled RSP microcode from the configs in rsp/.
 #
-# Unlike the candidate map, the output here IS committed: it is derived from
-# the ROM, which is not, so a checkout with no ROM still has to build. This
-# script exists so the committed file is reproducible rather than a artifact
-# nobody can regenerate -- run it after changing a toml, and commit the result.
+# The output is a mechanical translation of the game's own microcode, so like
+# generated/ it is gitignored and never committed: only the tomls are. The
+# build needs the ROM for generated/ anyway, and build_app.sh runs this after
+# recompile.sh, so a checkout with the ROM always has it.
 set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/common.sh"
 require_rom
@@ -31,6 +31,3 @@ if [ "$found" -eq 0 ]; then
     exit 2
 fi
 
-echo
-echo "Regenerated. Diff before committing: a change here that you did not"
-echo "intend means the toml or the ROM moved, not that the microcode did."

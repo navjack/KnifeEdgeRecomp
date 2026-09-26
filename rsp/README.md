@@ -23,7 +23,10 @@ runtime rather than assuming it.
 ## Audio
 
 **Stock `aspMain`, recompiled from ROM `0x23EC0`.** Config in
-[`aspMain.us.toml`](aspMain.us.toml), generated implementation in `aspMain.cpp`.
+[`aspMain.us.toml`](aspMain.us.toml). The generated `aspMain.cpp` is a
+translation of the game's own microcode, so it is gitignored like `generated/`;
+`scripts/build_app.sh` regenerates it from the ROM through
+`scripts/generate_rsp.sh`.
 
 It was located from the running game rather than by searching. The adapter logs
 the ucode pointer out of the first `M_AUDTASK` it sees; that was guest
