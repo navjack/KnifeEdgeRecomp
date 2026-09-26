@@ -1,0 +1,122 @@
+# Builds everything that does not need the ROM, on macOS, Linux and Windows.
+#
+# The ROM is never available here, so no job produces a runnable game: the
+# recompiled code in generated/ and the recompiled audio microcode are made
+# from it. What each job does establish, per platform:
+#   - the pinned upstreams fetch, and every patch applies with its fingerprint;
+#   - the recompiler (N64Recomp, RSPRecomp) and the standalone stack build;
+#   - every library the app links builds, and the port's own sources compile
+#     against them (scripts/check_native.sh);
+#   - the recompile step refuses to run without the ROM, as it must.
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-15
+          - name: Linux x64
+            os: ubuntu-24.04
+          - name: Windows x64
+            os: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Before checkout: the patches are fingerprinted byte for byte.
+      - name: Keep checkouts LF
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja sdl2-compat sdl3 freetype glew libzip nlohmann-json tinyxml2
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build clang libsdl2-dev libgtk-3-dev libx11-dev libxrandr-dev libfreetype-dev
+
+      - name: MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Toolchain
+        run: |
+          if [ "$RUNNER_OS" = Windows ] && ! command -v ninja >/dev/null; then
+            choco install ninja -y --no-progress
+          fi
+          cmake --version | head -1
+          ninja --version
+          case "$RUNNER_OS" in
+            Windows) clang-cl --version | head -1 ;;
+            *) clang --version | head -1 ;;
+          esac
+
+      # Keyed on the pins and the patches: a cached tree is already patched, and
+      # build_stack.sh recognises that from each patch's marker string.
+      - name: Cache pinned upstreams
+        uses: actions/cache@v4
+        with:
+          path: upstream
+          key: upstream-${{ runner.os }}-${{ hashFiles('UPSTREAM_PINS.txt', 'patches/*.patch') }}
+
+      - name: Fetch pinned upstreams
+        run: ./scripts/bootstrap.sh
+
+      - name: Build the stack
+        run: ./scripts/build_stack.sh
+
+      - name: Build every library and compile the port (no ROM)
+        run: ./scripts/check_native.sh
+
+      - name: Recompile refuses to run without the ROM
+        run: |
+          set +e
+          output=$(./scripts/recompile.sh 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$status" -ne 2 ] || ! printf '%s' "$output" | grep -q '^ROM is missing: '; then
+            echo "::error::recompile.sh should stop with status 2 and 'ROM is missing', got status $status"
+            exit 1
+          fi
+
+  tools:
+    name: Analysis tools
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/map-recovery/go.mod
+
+      - name: Go tools
+        run: |
+          for tool in map-recovery recomp-boundary-audit; do
+            (cd "tools/$tool" && go vet ./... && go build -o /dev/null .)
+          done
+
+      - name: Python tools compile
+        run: python3 -m py_compile tools/*/*.py
