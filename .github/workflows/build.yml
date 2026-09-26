@@ -10,8 +10,12 @@
 #   - the recompile step refuses to run without the ROM, as it must.
 name: Build
 
+# Pushes build on main only: a branch with a PR open would otherwise build every
+# commit twice, once per event, in separate concurrency groups. Other branches
+# build when a PR is opened for them, or by hand.
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
