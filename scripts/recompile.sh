@@ -3,7 +3,7 @@
 # It refuses to invent game metadata: with no ELF and no symbol map it stops.
 set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/common.sh"
-RECOMP=${N64RECOMP_BIN:-$ROOT/build/N64Recomp/N64Recomp}
+RECOMP=${N64RECOMP_BIN:-$ROOT/build/N64Recomp/N64Recomp$EXE}
 CANDIDATE=0
 if [ "${1:-}" = "--candidate" ]; then
     CANDIDATE=1

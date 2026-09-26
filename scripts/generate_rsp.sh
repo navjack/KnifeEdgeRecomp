@@ -9,7 +9,7 @@ set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/common.sh"
 require_rom
 
-TOOL="$ROOT/build/N64Recomp/RSPRecomp"
+TOOL="$ROOT/build/N64Recomp/RSPRecomp$EXE"
 if [ ! -x "$TOOL" ]; then
     echo "RSPRecomp is missing: $TOOL"
     echo "Run ./scripts/build_stack.sh first"
