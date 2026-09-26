@@ -1,6 +1,6 @@
 # Native macOS recompilation status
 
-Updated 2026-09-24.
+Updated 2026-09-26.
 
 ## Current gate (2026-09-25): playable, paced like the console
 
@@ -36,6 +36,47 @@ Next:
    method, starting with anything scripted on a rail.
 2. Review the candidate map into `input/` (still the long pole).
 3. Settle the save type.
+
+## Linux and Windows builds (2026-09-26)
+
+The build is no longer macOS-only. What was demonstrated, and where:
+
+- **Linux x86-64 (Ubuntu 24.04, clang 18), built here:** `build_stack.sh`
+  (N64Recomp, RSPRecomp, runtime, RT64 as `rt64.so`; a rerun is a no-op) and
+  `check_native.sh` from clean (716 build steps: RT64 static, the runtime,
+  RecompFrontend, and every port source). Never run: no ROM was available.
+  A by-hand link of the port objects against every built library, SDL2, GTK 3
+  and FreeType left exactly six symbols undefined, all ROM-derived:
+  `recomp_entrypoint` (generated code), `get_entrypoint_address` (lookup.cpp),
+  `aspMain` (RSPRecomp), and the three `register_generated.cpp` defines over
+  `recomp_overlays.inl`. So the Linux link closes once the ROM supplies them.
+- **Windows x64 and macOS arm64:** CI jobs exist for both
+  (`.github/workflows/build.yml`) and have not run yet.
+
+`check_native.sh` configures with `KNIFE_EDGE_CHECK_ONLY`, which builds every
+library the app links and compiles the port's own sources, with nothing from
+the ROM and no executable. That is the ceiling without the ROM. Off macOS, the
+final link (beyond the Linux probe above) and everything at run time are
+unverified.
+
+What the port needed, so the same shapes are recognisable later:
+
+- ultramodern's Linux `WindowHandle` is the `SDL_Window*`, and plume only makes
+  its `RenderWindow` one when `PLUME_SDL_VULKAN_ENABLED` is defined. RT64 sets
+  that for its own directory only, so recompui failed to assign the handle
+  until the module defined it globally.
+- `SDL_syswm.h` on Linux drags in X11's `None` macro, which breaks
+  ultramodern's `Device::None`. Linux has no use for the native handle, so the
+  header is not included there.
+- recompui resolves assets against the working directory off macOS. The app
+  now enters its executable's directory after parsing the command line.
+- libultraship is linked by nothing. `build_stack.sh` still builds it on macOS,
+  where it always has; elsewhere it would need SDL3, OpenGL and vcpkg for no
+  output. Removing it from the pins everywhere is the obvious follow-up.
+- Windows is set up from reasoning, not yet from a build: paths go through
+  `pwd -W` with MSYS argument rewriting off (it would otherwise read clang-cl's
+  `/FIstdlib.h` as a path), and text is checked out LF (`.gitattributes`) so the
+  patch fingerprints hold.
 
 ## Completed
 

@@ -1,7 +1,8 @@
 # Knife Edge: Nose Gunner — N64 recomp workspace
 
-Native macOS (Apple Silicon) static recompilation of *Knife Edge: Nose Gunner*
-(USA, `NKEE`).
+Native static recompilation of *Knife Edge: Nose Gunner* (USA, `NKEE`). The
+game has been played on macOS (Apple Silicon); Linux and Windows builds exist
+but have only been compiled, never run. See [Platforms](#platforms).
 
 There is no public decompilation of this game, so this follows the same route
 the Cruis'n workspace took: recover the metadata N64Recomp needs from the ROM
@@ -47,10 +48,44 @@ What is not yet established:
 | `decomp/` | Splat hints and the unreviewed candidate map. |
 | `generated/` | Recompiler output. Gitignored. |
 | `rsp/` | Title RSP microcode and the task adapter. |
-| `native/` | Shared SDL/Metal/RT64 frontend and the app's CMake module. |
+| `native/` | Shared SDL/RT64 frontend (Metal, Vulkan, D3D12) and the app's CMake module. |
 | `patches/` | Reproducible upstream patches, fingerprinted in `UPSTREAM_PINS.txt`. |
 | `upstream/` | Pinned checkouts. Gitignored. |
 | `scripts/` | Everything below. |
+
+## Platforms
+
+| Platform | Toolchain | Renderer | Established |
+| --- | --- | --- | --- |
+| macOS arm64 | Apple clang, Homebrew | Metal | Built, packaged and played. |
+| Linux x86-64 | clang, system SDL2 | Vulkan | Stack and ROM-free check build. Never linked with game code or run. |
+| Windows x64 | clang-cl in an MSVC environment, Git Bash | D3D12 / Vulkan | Configured to build; not yet built anywhere. |
+
+Dependencies beyond CMake 3.20+, Ninja and Git:
+
+- **macOS:** `brew install ninja sdl2-compat sdl3 freetype glew libzip nlohmann-json tinyxml2`
+  (the last four only for libultraship, which `build_stack.sh` builds on macOS alone).
+- **Linux (Debian/Ubuntu):** `clang libsdl2-dev libgtk-3-dev libx11-dev libxrandr-dev libfreetype-dev`.
+- **Windows:** Visual Studio 2022 with the C++ workload, LLVM (`clang-cl`), Git for
+  Windows. Run the scripts from Git Bash inside an x64 developer environment
+  (`vcvars64`). SDL2 is downloaded by CMake, pinned by hash.
+
+On Linux and Windows the build directory runs in place: assets, the controller
+database and (Windows) SDL2 and DXC land beside the executable, and the app makes
+that its working directory. Settings live under `~/.config/KnifeEdgeRecompiled/`
+or `%LOCALAPPDATA%\KnifeEdgeRecompiled\`.
+
+### Without the ROM
+
+```bash
+./scripts/bootstrap.sh && ./scripts/build_stack.sh && ./scripts/check_native.sh
+```
+
+`check_native.sh` builds every library the app links and compiles the port's own
+sources against them (`KNIFE_EDGE_CHECK_ONLY`), with nothing derived from the
+ROM and no executable. It is as far as a machine without the ROM can go, and it
+is what [CI](.github/workflows/build.yml) runs on macOS, Linux and Windows,
+together with a check that `recompile.sh` refuses to run without the ROM.
 
 ## The executable path
 
@@ -68,7 +103,8 @@ Split the ROM and produce the experimental probe:
 ./scripts/generate_candidate_symbols.sh
 ```
 
-Recompile from reviewed metadata, then build and package the app:
+Recompile from reviewed metadata, then build and package the app
+(`verify_release_app.sh` checks the macOS bundle only):
 
 ```bash
 ./scripts/recompile.sh
@@ -111,7 +147,7 @@ Environment variables, all for development:
 | `KNIFE_EDGE_DUMP_RDRAM=DIR:N,...` | Guest-order RDRAM at the given graphics tasks. |
 | `KNIFE_EDGE_POKE=ADDR=VALUE,...` | Rewrite guest words every VI (test harness, e.g. pin health). |
 | `KNIFE_EDGE_SCRIPT_UNTIL_LEVEL=1` | Stop `--input-script` input once a level starts. |
-| `KNIFE_EDGE_SESSION_LOG=1` | Log to `~/Library/Logs/KnifeEdge/` with a hang sampler (on by default from Finder). |
+| `KNIFE_EDGE_SESSION_LOG=1` | Log stderr to `~/Library/Logs/KnifeEdge/` (on by default from Finder, with a hang sampler), `$XDG_STATE_HOME/KnifeEdgeRecompiled/logs/` or `%LOCALAPPDATA%\KnifeEdgeRecompiled\logs\`. |
 
 ## Pinned upstreams
 
