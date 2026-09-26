@@ -58,8 +58,8 @@ What is not yet established:
 | Platform | Toolchain | Renderer | Established |
 | --- | --- | --- | --- |
 | macOS arm64 | Apple clang, Homebrew | Metal | Built, packaged and played. |
-| Linux x86-64 | clang, system SDL2 | Vulkan | Stack and ROM-free check build. Never linked with game code or run. |
-| Windows x64 | clang-cl in an MSVC environment, Git Bash | D3D12 / Vulkan | Configured to build; not yet built anywhere. |
+| Linux x86-64 | clang, system SDL2 | Vulkan | Stack and ROM-free check build in CI. Never linked with game code or run. |
+| Windows x64 | clang-cl in an MSVC environment, Git Bash | D3D12 / Vulkan | Stack and ROM-free check build in CI. Never linked with game code or run. |
 
 Dependencies beyond CMake 3.20+, Ninja and Git:
 
