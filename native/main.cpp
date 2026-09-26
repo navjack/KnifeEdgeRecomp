@@ -1,8 +1,15 @@
 #define SDL_MAIN_HANDLED
 
 #include "SDL.h"
+// Not on Linux, where nothing needs the native handle and SDL_syswm.h would pull
+// in X11's macros (None, Status, Bool) over ultramodern's enums.
+#if defined(__APPLE__)
 #include "SDL_metal.h"
 #include "SDL_syswm.h"
+#elif defined(_WIN32)
+#include <windows.h>
+#include "SDL_syswm.h"
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -29,7 +36,9 @@
 #include "librecomp/game.hpp"
 #include "nfd.h"
 #include "recomp.h"
+#if defined(__APPLE__)
 #include "macos_menu.h"
+#endif
 #include "recompinput/input_events.h"
 #include "recompinput/input_mapping.h"
 #include "recompinput/input_state.h"
@@ -55,7 +64,9 @@ std::vector<recomp::GameEntry> supported_games;
 
 namespace {
 
+#if defined(__APPLE__)
 SDL_MetalView metal_view = nullptr;
+#endif
 
 std::mutex audio_mutex;
 SDL_AudioDeviceID audio_device = 0;
@@ -122,13 +133,21 @@ void* create_gfx() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK) != 0) {
         fail("SDL initialization failed");
     }
+#if defined(__APPLE__)
     // After SDL_Init, because that is what creates the NSApplication.
     knife_edge_install_macos_menu(KNIFE_EDGE_DISPLAY_NAME);
+#endif
     return nullptr;
 }
 
 ultramodern::renderer::WindowHandle create_window(void*) {
+#if defined(__APPLE__)
     const uint32_t flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_METAL | SDL_WINDOW_ALLOW_HIGHDPI;
+#elif defined(_WIN32)
+    const uint32_t flags = SDL_WINDOW_RESIZABLE;
+#else
+    const uint32_t flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN;
+#endif
     window = SDL_CreateWindow(KNIFE_EDGE_WINDOW_TITLE,
                               SDL_WINDOWPOS_CENTERED,
                               SDL_WINDOWPOS_CENTERED,
@@ -139,12 +158,23 @@ ultramodern::renderer::WindowHandle create_window(void*) {
         fail("SDL window creation failed");
     }
 
+#if defined(__linux__)
+    // RT64 creates its Vulkan surface from the SDL window itself, which works
+    // the same under X11 and Wayland.
+    return window;
+#else
     SDL_SysWMinfo wm_info{};
     SDL_VERSION(&wm_info.version);
     if (SDL_GetWindowWMInfo(window, &wm_info) != SDL_TRUE) {
         fail("SDL native-window lookup failed");
     }
-
+#if defined(_WIN32)
+    // RT64 presents to the HWND; the thread id is the one that pumps its messages.
+    return ultramodern::renderer::WindowHandle{
+        .window = wm_info.info.win.window,
+        .thread_id = GetCurrentThreadId(),
+    };
+#else
     // RT64 renders through Metal: plume expects the NSWindow and its CAMetalLayer.
     metal_view = SDL_Metal_CreateView(window);
     if (metal_view == nullptr) {
@@ -154,6 +184,8 @@ ultramodern::renderer::WindowHandle create_window(void*) {
         .window = wm_info.info.cocoa.window,
         .view = SDL_Metal_GetLayer(metal_view),
     };
+#endif
+#endif
 }
 
 void update_gfx(void*) {
@@ -412,7 +444,7 @@ std::string get_thread_name(const OSThread* thread) {
 bool load_input_script(const std::filesystem::path& path) {
     std::ifstream script_file{path};
     if (!script_file) {
-        std::fprintf(stderr, "Unable to open input script '%s'\n", path.c_str());
+        std::fprintf(stderr, "Unable to open input script '%s'\n", path.string().c_str());
         return false;
     }
     std::string line;
@@ -431,7 +463,7 @@ bool load_input_script(const std::filesystem::path& path) {
         const int fields = std::sscanf(line.c_str(), "%llu %llu %x %f %f",
                                        &start_vi, &end_vi, &buttons, &stick_x, &stick_y);
         if ((fields != 3 && fields != 5) || end_vi <= start_vi || buttons > 0xFFFF) {
-            std::fprintf(stderr, "Invalid input script line %zu in '%s'\n", line_number, path.c_str());
+            std::fprintf(stderr, "Invalid input script line %zu in '%s'\n", line_number, path.string().c_str());
             return false;
         }
         input_script.push_back(InputScriptSegment{
@@ -657,6 +689,36 @@ extern "C" void knife_edge_trace_return(const char* function_name) {
     }
 }
 
+#if !defined(__APPLE__)
+// Off macOS, recompui resolves its assets and the controller database against
+// the working directory, which a desktop launcher or a shell can put anywhere.
+// Make it the executable's directory. Runs after the command line is parsed,
+// and the one path kept from it for later is made absolute first.
+void enter_executable_directory() {
+#if defined(_WIN32)
+    std::wstring buffer(32768, L'\0');
+    const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size()) {
+        return;
+    }
+    buffer.resize(length);
+    const std::filesystem::path executable{buffer};
+#else
+    std::error_code link_error;
+    const std::filesystem::path executable = std::filesystem::read_symlink("/proc/self/exe", link_error);
+    if (link_error) {
+        return;
+    }
+#endif
+    std::error_code error;
+    std::filesystem::current_path(executable.parent_path(), error);
+    if (error) {
+        std::fprintf(stderr, "Unable to enter '%s': %s\n",
+                     executable.parent_path().string().c_str(), error.message().c_str());
+    }
+}
+#endif
+
 // Once the game is running, SDL_QUIT opens a confirmation prompt instead of
 // quitting -- which is unusable if rendering is broken, because the prompt is
 // part of what is not being drawn. An app you cannot quit is broken no matter
@@ -696,6 +758,12 @@ int main(int argc, char** argv) {
     if (!parse_runtime_options(argc, argv)) {
         return EXIT_FAILURE;
     }
+#if !defined(__APPLE__)
+    if (!autoboot_rom_path.empty()) {
+        autoboot_rom_path = std::filesystem::absolute(autoboot_rom_path);
+    }
+    enter_executable_directory();
+#endif
 
     recompui::programconfig::set_program_name(KNIFE_EDGE_PROGRAM_NAME);
     recompui::programconfig::set_program_id(KNIFE_EDGE_PROGRAM_ID);
@@ -705,7 +773,7 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(app_folder, app_folder_error);
     if (app_folder_error) {
         std::fprintf(stderr, "Unable to create application data directory '%s': %s\n",
-                     app_folder.c_str(), app_folder_error.message().c_str());
+                     app_folder.string().c_str(), app_folder_error.message().c_str());
         return EXIT_FAILURE;
     }
 
@@ -825,9 +893,11 @@ int main(int argc, char** argv) {
             audio_device = 0;
         }
     }
+#if defined(__APPLE__)
     if (metal_view != nullptr) {
         SDL_Metal_DestroyView(metal_view);
     }
+#endif
     if (window != nullptr) {
         SDL_DestroyWindow(window);
     }
