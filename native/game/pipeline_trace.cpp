@@ -15,7 +15,6 @@
 #include <atomic>
 #include <chrono>
 #include <algorithm>
-#include <execinfo.h>
 #include <cstring>
 #include <cmath>
 #include <set>
@@ -28,6 +27,17 @@
 
 #include "cpu_cost.h"
 #include "rdp_model.h"
+
+#if defined(_WIN32)
+// No execinfo on Windows. The stacks below are diagnostics for chasing guest
+// callers, not behaviour, so there they are simply empty.
+namespace {
+int backtrace(void**, int) { return 0; }
+char** backtrace_symbols(void* const*, int) { return nullptr; }
+}
+#else
+#include <execinfo.h>
+#endif
 
 extern "C" void knife_edge_dma_take(uint64_t* step_bytes, uint64_t* other_bytes);
 extern "C" void knife_edge_model_trace_next(int enable);

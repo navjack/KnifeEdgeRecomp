@@ -1,6 +1,6 @@
 # Native macOS recompilation status
 
-Updated 2026-09-24.
+Updated 2026-09-26.
 
 ## Current gate (2026-09-25): playable, paced like the console
 
@@ -36,6 +36,59 @@ Next:
    method, starting with anything scripted on a rail.
 2. Review the candidate map into `input/` (still the long pole).
 3. Settle the save type.
+
+## Linux and Windows builds (2026-09-26)
+
+The build is no longer macOS-only. What was demonstrated, and where:
+
+- **Linux x86-64 (Ubuntu 24.04, clang 18), built here:** `build_stack.sh`
+  (N64Recomp, RSPRecomp, runtime, RT64 as `rt64.so`; a rerun is a no-op) and
+  `check_native.sh` from clean (716 build steps: RT64 static, the runtime,
+  RecompFrontend, and every port source). Never run: no ROM was available.
+  A by-hand link of the port objects against every built library, SDL2, GTK 3
+  and FreeType left exactly six symbols undefined, all ROM-derived:
+  `recomp_entrypoint` (generated code), `get_entrypoint_address` (lookup.cpp),
+  `aspMain` (RSPRecomp), and the three `register_generated.cpp` defines over
+  `recomp_overlays.inl`. So the Linux link closes once the ROM supplies them.
+- **CI, all three hosts (run 36230836516):** `build_stack.sh`,
+  `check_native.sh` and the check that `recompile.sh` stops with "ROM is
+  missing" pass on macOS arm64 (Apple clang 17), Ubuntu 24.04 (clang 18) and
+  Windows x64 (clang-cl 19.1.5 from Git Bash in an MSVC environment). For
+  Windows that is the whole of what is established: the libraries build and
+  the port compiles. The final link and every run are untried.
+- **macOS arm64, with the ROM, on this branch:** `build_app.sh --candidate`,
+  `verify_release_app.sh`, and a 600-VI `smoke_run.sh` (exit 0, 169 graphics
+  frames, audio producing samples, no diagnostics). So the refactor of the app
+  module left the played build intact.
+
+`check_native.sh` configures with `KNIFE_EDGE_CHECK_ONLY`, which builds every
+library the app links and compiles the port's own sources, with nothing from
+the ROM and no executable. That is the ceiling without the ROM. Off macOS, the
+final link (beyond the Linux probe above) and everything at run time are
+unverified.
+
+What the port needed, so the same shapes are recognisable later:
+
+- ultramodern's Linux `WindowHandle` is the `SDL_Window*`, and plume only makes
+  its `RenderWindow` one when `PLUME_SDL_VULKAN_ENABLED` is defined. RT64 sets
+  that for its own directory only, so recompui failed to assign the handle
+  until the module defined it globally.
+- `SDL_syswm.h` on Linux drags in X11's `None` macro, which breaks
+  ultramodern's `Device::None`. Linux has no use for the native handle, so the
+  header is not included there.
+- recompui resolves assets against the working directory off macOS. The app
+  now enters its executable's directory after parsing the command line.
+- libultraship is linked by nothing. `build_stack.sh` still builds it on macOS,
+  where it always has; elsewhere it would need SDL3, OpenGL and vcpkg for no
+  output. Removing it from the pins everywhere is the obvious follow-up.
+- Windows paths go through `pwd -W` with MSYS argument rewriting off (it
+  would otherwise read clang-cl's `/FIstdlib.h` as a path), and text is checked
+  out LF (`.gitattributes`) so the patch fingerprints hold.
+- On Windows, `-DCMAKE_CXX_FLAGS=...` on the command line replaces CMake's
+  MSVC defaults, `/EHsc` among them, and RT64's texture tools then fail with
+  "cannot use 'try' with exceptions disabled". `build_stack.sh` passes RT64's
+  forced include through `CMAKE_CXX_FLAGS_INIT` there, which CMake extends
+  with its defaults instead.
 
 ## Completed
 

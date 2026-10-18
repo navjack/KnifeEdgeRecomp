@@ -1,6 +1,7 @@
 #!/bin/sh
 # Verifies the pinned checkouts and patch fingerprints, applies the patches, and
-# builds the shared arm64 stack into build/.
+# builds the shared stack into build/: arm64 on macOS, the host architecture on
+# Linux and Windows.
 set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/common.sh"
 require_lock_file
@@ -28,7 +29,7 @@ verify_checkout() {
 
 verify_patch() {
     expected=$(require_lock_value "patches/$1.sha256")
-    actual=$(shasum -a 256 "$ROOT/patches/$1" | awk '{ print $1 }')
+    actual=$(sha256_of "$ROOT/patches/$1")
     if [ "$actual" != "$expected" ]; then
         echo "Patch fingerprint mismatch: patches/$1"
         exit 2
@@ -101,32 +102,58 @@ apply_patch N64ModernRuntime N64ModernRuntime-cop0-status-tolerance.patch \
 apply_patch N64Recomp N64Recomp-zero-register-writes.patch \
     'Writes to $zero have no effect' src/recompilation.cpp
 
-COMMON_ARGS="-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0"
+COMMON_ARGS="-G Ninja -DCMAKE_BUILD_TYPE=Release $PLATFORM_CMAKE_ARGS"
+
+# RT64 has always been built here with stdlib.h forced in; clang-cl spells the
+# forced include differently. On Windows it goes through _INIT, which CMake
+# extends with its MSVC defaults: setting CMAKE_CXX_FLAGS outright would drop
+# /EHsc, and RT64's tools then fail with exceptions disabled.
+if [ "$HOST_OS" = windows ]; then
+    RT64_CXX_FLAGS_ARG=-DCMAKE_CXX_FLAGS_INIT=/FIstdlib.h
+else
+    RT64_CXX_FLAGS_ARG="-DCMAKE_CXX_FLAGS=-include stdlib.h"
+fi
 
 echo "Building N64Recomp"
 "$CMAKE_BIN" -S "$ROOT/upstream/N64Recomp" -B "$ROOT/build/N64Recomp" $COMMON_ARGS
-"$CMAKE_BIN" --build "$ROOT/build/N64Recomp" --parallel 8
+"$CMAKE_BIN" --build "$ROOT/build/N64Recomp" --parallel "$JOBS"
 
 echo "Building N64ModernRuntime"
 "$CMAKE_BIN" -S "$ROOT/upstream/N64ModernRuntime" -B "$ROOT/build/N64ModernRuntime" $COMMON_ARGS \
     -DN64RECOMP_ROOT="$ROOT/upstream/N64Recomp"
-"$CMAKE_BIN" --build "$ROOT/build/N64ModernRuntime" --parallel 8
+"$CMAKE_BIN" --build "$ROOT/build/N64ModernRuntime" --parallel "$JOBS"
 
-echo "Building libultraship"
-"$CMAKE_BIN" -S "$ROOT/upstream/libultraship" -B "$ROOT/build/libultraship" $COMMON_ARGS \
-    -DLUS_BUILD_TESTS=OFF -DINCLUDE_MPQ_SUPPORT=OFF
-"$CMAKE_BIN" --build "$ROOT/build/libultraship" --parallel 8
+# Nothing in this port links libultraship; it is here because the Cruis'n pins
+# were verified as a set on macOS. Elsewhere it would pull in SDL3, OpenGL and
+# vcpkg to produce a library no target uses, so it is only built on macOS.
+if [ "$HOST_OS" = macos ]; then
+    echo "Building libultraship"
+    "$CMAKE_BIN" -S "$ROOT/upstream/libultraship" -B "$ROOT/build/libultraship" $COMMON_ARGS \
+        -DLUS_BUILD_TESTS=OFF -DINCLUDE_MPQ_SUPPORT=OFF
+    "$CMAKE_BIN" --build "$ROOT/build/libultraship" --parallel "$JOBS"
+fi
 
 echo "Building RT64"
 "$CMAKE_BIN" -S "$ROOT/upstream/rt64" -B "$ROOT/build/rt64" $COMMON_ARGS \
-    '-DCMAKE_CXX_FLAGS=-include stdlib.h' -DZSTD_BUILD_PROGRAMS=OFF -DZSTD_BUILD_TESTS=OFF
-"$CMAKE_BIN" --build "$ROOT/build/rt64" --parallel 8
+    "$RT64_CXX_FLAGS_ARG" -DZSTD_BUILD_PROGRAMS=OFF -DZSTD_BUILD_TESTS=OFF
+"$CMAKE_BIN" --build "$ROOT/build/rt64" --parallel "$JOBS"
 
-test -x "$ROOT/build/N64Recomp/N64Recomp"
-test -f "$ROOT/build/N64ModernRuntime/ultramodern/libultramodern.a"
-test -f "$ROOT/build/N64ModernRuntime/librecomp/liblibrecomp.a"
-test -f "$ROOT/build/libultraship/src/libultraship.a"
-test -f "$ROOT/build/rt64/rt64.dylib"
+case "$HOST_OS" in
+    macos) static_lib() { echo "$1/lib$2.a"; }; RT64_LIBRARY=rt64.dylib ;;
+    linux) static_lib() { echo "$1/lib$2.a"; }; RT64_LIBRARY=rt64.so ;;
+    windows) static_lib() { echo "$1/$2.lib"; }; RT64_LIBRARY=rt64.dll ;;
+esac
 
-echo "Native arm64 stack is ready"
-file "$ROOT/build/N64Recomp/N64Recomp" "$ROOT/build/rt64/rt64.dylib"
+test -x "$ROOT/build/N64Recomp/N64Recomp$EXE"
+test -x "$ROOT/build/N64Recomp/RSPRecomp$EXE"
+test -f "$(static_lib "$ROOT/build/N64ModernRuntime/ultramodern" ultramodern)"
+test -f "$(static_lib "$ROOT/build/N64ModernRuntime/librecomp" librecomp)"
+if [ "$HOST_OS" = macos ]; then
+    test -f "$(static_lib "$ROOT/build/libultraship/src" ultraship)"
+fi
+test -f "$ROOT/build/rt64/$RT64_LIBRARY"
+
+echo "Native stack is ready ($HOST_OS)"
+if command -v file >/dev/null 2>&1; then
+    file "$ROOT/build/N64Recomp/N64Recomp$EXE" "$ROOT/build/rt64/$RT64_LIBRARY"
+fi

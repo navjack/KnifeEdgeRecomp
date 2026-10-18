@@ -1,0 +1,5 @@
+# Everything text is LF in the working tree on every platform. The scripts are
+# POSIX sh, and UPSTREAM_PINS.txt fingerprints the patches byte for byte, so a
+# CRLF checkout (Git for Windows' default) would break both.
+* text=auto eol=lf
+*.ttf binary

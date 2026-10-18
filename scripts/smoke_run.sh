@@ -15,8 +15,14 @@ set -eu
 require_rom
 
 FRAMES=${1:-600}
-APP="$ROOT/Knife Edge Nose Gunner.app/Contents/MacOS/knife_edge"
-[ -x "$APP" ] || { echo "No packaged app; run scripts/build_app.sh first" >&2; exit 1; }
+# The packaged bundle on macOS; Linux and Windows run the build in place, and
+# the app moves itself to its own directory, so the caller's does not matter.
+if [ "$HOST_OS" = macos ]; then
+    APP="$ROOT/$DISPLAY_NAME.app/Contents/MacOS/$GAME_ID"
+else
+    APP="$ROOT/build/app/$GAME_ID$EXE"
+fi
+[ -x "$APP" ] || { echo "No built app at $APP; run scripts/build_app.sh first" >&2; exit 1; }
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

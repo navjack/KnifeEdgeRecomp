@@ -1,16 +1,19 @@
 # Knife Edge: Nose Gunner — recomp workspace
 
-Native macOS arm64 static recompilation of *Knife Edge: Nose Gunner* (USA,
-`NKEE`). There is no public decompilation of this game; metadata is recovered
-from the ROM. Read [`RECOMP_STATUS.md`](RECOMP_STATUS.md) first — it holds the
-current gate — and [`docs/ROM_ANALYSIS.md`](docs/ROM_ANALYSIS.md) for everything
-established about the ROM.
+Native static recompilation of *Knife Edge: Nose Gunner* (USA, `NKEE`). macOS
+arm64 is the platform that has been played. Linux and Windows are wired up to
+build (see `README.md`, Platforms); neither has run the game. There is no
+public decompilation of this game; metadata is recovered from the ROM. Read
+[`RECOMP_STATUS.md`](RECOMP_STATUS.md) first — it holds the current gate — and
+[`docs/ROM_ANALYSIS.md`](docs/ROM_ANALYSIS.md) for everything established about
+the ROM.
 
 ## Commands
 
 ```bash
 ./scripts/bootstrap.sh                   # fetch pinned upstreams
-./scripts/build_stack.sh                 # patch + build N64Recomp, runtime, LUS, RT64
+./scripts/build_stack.sh                 # patch + build N64Recomp, runtime, RT64 (+ LUS on macOS)
+./scripts/check_native.sh                # ROM-free: every app library + port sources, no exe
 ./scripts/bootstrap_decomp.sh            # splat venv
 ./scripts/split_rom.sh                   # regenerate asm/ and assets/
 ./scripts/generate_candidate_symbols.sh  # unreviewed probe map
@@ -21,7 +24,10 @@ established about the ROM.
 ```
 
 `scripts/common.sh` is sourced by all of them and holds the ROM path, its
-SHA-256 and the shared cmake binary.
+SHA-256, the shared cmake binary, and the host detection (`HOST_OS`,
+`PLATFORM_CMAKE_ARGS`: Apple clang, clang, or clang-cl from Git Bash in an MSVC
+developer environment). CI (`.github/workflows/build.yml`) runs bootstrap,
+build_stack and check_native on all three.
 
 ## Architecture
 
@@ -36,12 +42,15 @@ than producing a placeholder:
    generated code calls `<symbol>_recomp` replacements that `funcs.h` only
    partly declares.
 3. **Native app** — `native/KnifeEdgeNative.cmake` links the generated code with
-   N64ModernRuntime, RT64 and RecompFrontend into a bundle. Game facts (ids,
+   N64ModernRuntime, RT64 and RecompFrontend into a bundle on macOS, or an
+   executable with its assets beside it on Linux and Windows.
+   `KNIFE_EDGE_CHECK_ONLY` stops short of anything ROM-derived. Game facts (ids,
    names, ROM hash, save type) live in the top-level `CMakeLists.txt` and reach
    C++ through `native/game_config.hpp.in`.
 
-`native/main.cpp` is the shared frontend: SDL window, Metal view for RT64,
-audio resampling to 48 kHz, input, and the development flags documented in
+`native/main.cpp` is the shared frontend: SDL window (a Metal view on macOS,
+the SDL window itself for Vulkan on Linux, the HWND on Windows), audio
+resampling to 48 kHz, input, and the development flags documented in
 `README.md`. It is game-agnostic apart from the `game_config.hpp` macros and
 `set_default_bindings()`.
 

@@ -4,6 +4,11 @@ set -eu
 . "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/common.sh"
 require_lock_file
 
+# The patches in patches/ are LF, and git apply will not match them against a
+# checkout that autocrlf has rewritten to CRLF, as Git for Windows does by
+# default. Settings given with -c reach the submodule clones too.
+GIT="git -c core.autocrlf=false"
+
 checkout_pinned() {
     name=$1
     url=$2
@@ -21,14 +26,14 @@ checkout_pinned() {
             echo "Refusing to alter an existing checkout. Resolve it manually, then rerun."
             exit 2
         fi
-        git -C "$target" submodule update --init --recursive
+        $GIT -C "$target" submodule update --init --recursive
         echo "verified $name @ $revision"
         return
     fi
 
-    git clone --recurse-submodules "$url" "$target"
-    git -C "$target" checkout --detach "$revision"
-    git -C "$target" submodule update --init --recursive
+    $GIT clone --recurse-submodules "$url" "$target"
+    $GIT -C "$target" checkout --detach "$revision"
+    $GIT -C "$target" submodule update --init --recursive
     echo "cloned $name @ $revision"
 }
 

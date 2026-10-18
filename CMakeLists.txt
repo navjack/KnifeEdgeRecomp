@@ -1,10 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
-project(knife_edge LANGUAGES C CXX OBJC OBJCXX)
+project(knife_edge LANGUAGES C CXX)
+if (APPLE)
+    enable_language(OBJC OBJCXX)
+endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(KNIFE_EDGE_ROOT "" CACHE PATH "Knife Edge workspace root")
+option(KNIFE_EDGE_CHECK_ONLY
+    "Build every library and compile the port's own sources, without the ROM-derived code. No executable."
+    OFF)
 if (NOT KNIFE_EDGE_ROOT)
     get_filename_component(KNIFE_EDGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" ABSOLUTE)
 endif()
