@@ -1,0 +1,11 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Knife Edge: Nose Gunner",
+  "wikidata": "Q3197991",
+  "system": "N64",
+  "type": "recomp",
+  "status": "in-progress",
+  "targets": ["macOS"],
+  "toolchain": "N64Recomp",
+  "original": {"region": "USA"}
+}
